@@ -1,0 +1,236 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #111;
+  color: #eee;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+}
+
+#dropzone {
+  margin: auto;
+  width: 100%;
+  max-width: 600px;
+  padding: 3rem;
+  border: 2px dashed #555;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+#dropzone.dragover {
+  border-color: #4ea1ff;
+  background: rgba(78, 161, 255, 0.08);
+}
+
+#editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+#editor[hidden] {
+  display: none;
+}
+
+#app-header {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #2a2a2a;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+#editor-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+#viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #2a2a2a;
+  flex-wrap: wrap;
+}
+
+#zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  color: #ccc;
+}
+
+#zoom-controls input[type="range"] {
+  width: 140px;
+}
+
+#ab-toggle,
+#fit-button,
+#render-button,
+#download-button {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+#ab-toggle:hover,
+#fit-button:hover,
+#render-button:hover,
+#download-button:hover {
+  border-color: #4ea1ff;
+}
+
+#ab-toggle.active {
+  border-color: #4ea1ff;
+  color: #4ea1ff;
+}
+
+#render-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#viewport-frame {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  min-height: 0;
+}
+
+.canvas-stack {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center center;
+  display: inline-block;
+}
+
+.canvas-stack canvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
+  max-width: none;
+  max-height: none;
+}
+
+.canvas-stack canvas[hidden] {
+  display: none;
+}
+
+#sidebar {
+  flex: none;
+  width: 300px;
+  overflow-y: auto;
+  border-left: 1px solid #2a2a2a;
+  padding: 1rem;
+}
+
+.control-section {
+  margin-bottom: 1.5rem;
+}
+
+.control-section h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  border-bottom: 1px solid #2a2a2a;
+  padding-bottom: 0.3rem;
+}
+
+.control-section label {
+  display: block;
+  font-size: 0.85rem;
+  color: #ccc;
+  margin-top: 0.6rem;
+}
+
+.control-section input[type="range"] {
+  width: 100%;
+  margin-top: 0.2rem;
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+#render-controls {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+#render-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+#render-progress[hidden] {
+  display: none;
+}
+
+#render-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #333;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#render-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #4ea1ff;
+  transition: width 0.1s linear;
+}
+
+#status {
+  font-size: 0.8rem;
+  color: #888;
+}

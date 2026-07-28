@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NW-FILM</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="dropzone">
+        <p>Arrastra una imagen aquí (o haz clic para elegir un archivo)</p>
+        <input id="file-input" type="file" accept="image/*" hidden />
+      </div>
+
+      <div id="editor" hidden>
+        <header id="app-header">
+          <span>NW-FILM</span>
+          <span id="status"></span>
+        </header>
+
+        <div id="editor-body">
+          <div id="viewport">
+            <div id="toolbar">
+              <button id="ab-toggle" type="button">Ver original</button>
+              <div id="zoom-controls">
+                <label for="zoom-slider">Zoom <span id="zoom-value">100</span>%</label>
+                <input id="zoom-slider" type="range" min="10" max="500" step="1" value="100" />
+                <button id="fit-button" type="button">Ajustar</button>
+              </div>
+            </div>
+
+            <div id="viewport-frame">
+              <div class="canvas-stack">
+                <canvas id="canvas-original" hidden></canvas>
+                <canvas id="canvas-processed"></canvas>
+                <canvas id="canvas-rendered" hidden></canvas>
+              </div>
+            </div>
+          </div>
+
+          <aside id="sidebar">
+            <section class="control-section">
+              <h3>Balance de blanco</h3>
+              <label for="temperature-slider">
+                Temperatura: <span id="temperature-value">0</span>
+              </label>
+              <input id="temperature-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <label for="tint-slider">
+                Matiz: <span id="tint-value">0</span>
+              </label>
+              <input id="tint-slider" type="range" min="-100" max="100" step="1" value="0" />
+            </section>
+
+            <section class="control-section">
+              <h3>Tono</h3>
+              <label for="exposure-slider">
+                Exposición: <span id="exposure-value">0.0</span> pasos
+              </label>
+              <input id="exposure-slider" type="range" min="-3" max="3" step="0.1" value="0" />
+
+              <label for="highlights-slider">
+                Luces: <span id="highlights-value">0</span>
+              </label>
+              <input id="highlights-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <label for="shadows-slider">
+                Sombras: <span id="shadows-value">0</span>
+              </label>
+              <input id="shadows-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <label for="whites-slider">
+                Blancos: <span id="whites-value">0</span>
+              </label>
+              <input id="whites-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <label for="blacks-slider">
+                Negros: <span id="blacks-value">0</span>
+              </label>
+              <input id="blacks-slider" type="range" min="-100" max="100" step="1" value="0" />
+            </section>
+
+            <section class="control-section">
+              <h3>Grano y nitidez</h3>
+              <label for="grain-slider">
+                Grano: <span id="grain-value">1.0</span>×
+              </label>
+              <input id="grain-slider" type="range" min="0" max="2.5" step="0.05" value="1" />
+
+              <label for="acutance-slider">
+                Acutancia: <span id="acutance-value">1.00</span>×
+              </label>
+              <input id="acutance-slider" type="range" min="0" max="3" step="0.1" value="1" />
+            </section>
+
+            <section class="control-section">
+              <h3>Salida</h3>
+              <label class="checkbox-label">
+                <input id="paper-toggle" type="checkbox" checked />
+                Simulación de papel Portra Endura (si no, vista previa plana)
+              </label>
+
+              <div id="render-controls">
+                <button id="render-button" type="button">Renderizar grano riguroso</button>
+                <div id="render-progress" hidden>
+                  <div id="render-progress-bar"><div id="render-progress-fill"></div></div>
+                  <span id="render-progress-text">0%</span>
+                </div>
+                <button id="download-button" type="button" hidden>Descargar PNG</button>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

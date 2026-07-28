@@ -1,5 +1,87 @@
 # Progress log
 
+## 2026-07-29 (continuación — Quitar leyenda técnica del estado)
+- Tras cargar una imagen ya no se muestra el texto "Imagen WxH. Halation + curva Portra 400 + grano + papel Endura aplicados." en la cabecera — quedaba de las primeras fases del proyecto (para depurar visualmente) y no aportaba nada a un usuario editando. Los demás mensajes de estado (cargando, errores, progreso del render riguroso) se mantienen.
+- Verificado en el navegador: cabecera limpia tras cargar. Sin errores de consola nuevos, 23 tests siguen pasando.
+- **Con esto se completa el bloque de flujo de trabajo entero** (abrir/cambiar imagen, exportar, pinch zoom, lado a lado, quitar leyenda). De los cinco bloques originales de feedback, solo quedan: decidir el enfoque para el banding a 16 bits, y al final arreglar el renderizador de grano riguroso.
+
+## 2026-07-29 (continuación — Vista lado a lado)
+- Añadido el botón "Lado a lado" en la barra de herramientas. El visor ahora tiene dos paneles reales (antes uno solo con original/editada superpuestos y alternados) — en modo normal siguen superpuestos como antes, pero el botón nuevo los reparte a partes iguales del ancho para verlos los dos a la vez. Zoom y arrastre sincronizados entre ambos.
+- El ajuste automático de zoom ahora tiene en cuenta que cada panel solo tiene la mitad del ancho cuando el modo lado a lado está activo. El botón "Ver original" se deshabilita mientras tanto (ya se ven las dos versiones a la vez).
+- Verificado en el navegador: activar/desactivar el modo, comprobar que ambos paneles muestran contenido distinto (original vs. revelado), y que "Ver original" sigue funcionando en modo normal. Sin errores de consola nuevos, 23 tests siguen pasando.
+- Queda un solo punto del bloque de flujo de trabajo: quitar la leyenda técnica del estado.
+
+## 2026-07-29 (continuación — Pinch zoom en trackpad)
+- Añadido zoom con gesto de pellizco (pinch) en trackpad sobre el visor. Se detecta como el navegador lo entrega realmente: evento `wheel` con `ctrlKey` activo, distinto del scroll normal de dos dedos. Reutiliza `setZoomPercent()`, la misma función del slider de zoom — quedan sincronizados.
+- Verificado con eventos wheel sintéticos (ctrlKey + deltaY negativo/positivo): el zoom sube y baja en la dirección correcta; sin ctrlKey no hace nada. Sin errores de consola nuevos, 23 tests siguen pasando.
+- Pendiente del bloque de flujo de trabajo: ver A/B lado a lado, quitar la leyenda técnica del estado.
+
+## 2026-07-29 (continuación — Botón de exportar)
+- Añadido el botón "Exportar" en la barra de herramientas (siempre visible en cuanto hay imagen cargada). Descarga como PNG lo que se esté viendo: el render riguroso si ya está hecho, o si no, el preview en tiempo real directamente desde el canvas WebGPU. Convive con el "Descargar PNG" contextual que ya existía tras renderizar el grano riguroso (detalle de por qué en `decisions.md`).
+- Verificado programáticamente: el PNG exportado decodifica bien, tiene las dimensiones correctas y contiene color real (no está en blanco). Sin errores de consola nuevos, 23 tests siguen pasando.
+- Pendiente del bloque de flujo de trabajo: pinch zoom en trackpad, ver A/B lado a lado, quitar la leyenda técnica del estado.
+
+## 2026-07-29 (continuación — Botón de abrir/cambiar imagen, primer punto del bloque de flujo de trabajo)
+- El usuario aclaró que quiere la app abriendo directamente con el editor completo (menús, sliders, todo visible), sin la pantalla de bienvenida de solo-carga que había hasta ahora.
+- Eliminada `#dropzone`. `#editor` ya no se oculta, es la única vista. Dentro del visor, un mensaje superpuesto (`#empty-state`) invita a cargar una imagen mientras no hay ninguna — desaparece al cargar la primera y no vuelve a aparecer. Nuevo botón "Abrir imagen" en la barra de herramientas. El arrastrar-soltar funciona sobre todo el visor, tanto para la primera carga como para reemplazar la imagen actual en cualquier momento (antes solo funcionaba en la pantalla de bienvenida).
+- Verificado: cargar la primera imagen (mensaje desaparece), arrastrar una segunda imagen de tamaño distinto encima (reemplaza correctamente, zoom se reajusta), botón "Abrir imagen" no lanza errores. Sin errores de consola, 23 tests siguen pasando.
+- Pendiente del bloque de flujo de trabajo: botón de exportar, pinch zoom en trackpad, ver A/B lado a lado, quitar la leyenda técnica del estado.
+
+## 2026-07-29 (continuación — Botón de reset por slider)
+- Añadido un botón circular "↺" junto a los 15 sliders de edición. Un único bloque de JS genérico (delegado por `data-reset`/`data-default` en el HTML) reutiliza el listener "input" que cada slider ya tenía — no se duplicó lógica por slider.
+- Verificado con un script que cambia los 15 sliders a valores no por defecto y comprueba que todos vuelven a su valor correcto (incluida la exposición, cuyo default es -0.7 y no 0) tras pulsar el botón. Sin errores de consola nuevos, 23 tests siguen pasando.
+- El usuario decidió saltarse el punto de undo/redo (queda aparcado, no descartado). Con esto se da por cerrado el bloque de controles nuevos y se pasa al bloque de flujo de trabajo (abrir/cambiar imagen, exportar, pinch zoom, A/B lado a lado, quitar leyenda técnica).
+
+## 2026-07-29 (continuación — Desplegable de papel)
+- Sustituida la casilla "Simulación de papel Portra Endura" por un desplegable "Papel" con las mismas dos opciones (Portra Endura / Ninguno). Mismo comportamiento interno, solo cambia el control — preparado para añadir más papeles/escáneres el día que se implementen.
+- Verificado: alternar entre opciones cambia correctamente el resultado y deshabilita "Temperatura del papel" cuando no hay papel. Sin errores de consola, 23 tests siguen pasando.
+- Pendiente del bloque de controles nuevos: botón de reset por slider, undo/redo.
+
+## 2026-07-29 (continuación — Tamaño de grano)
+- Añadido el slider "Tamaño de grano" (0.3×-3×). Multiplica el tamaño en píxeles del grano (`GRAIN_SIZE_FRACTION`). También se cambió `grain.wgsl` para que la textura fina interna del grano escale proporcionalmente al agrupamiento (antes era un tamaño fijo de 1.1px) — si no, al agrandar mucho el grano se veían grumos grandes con una arenilla fina ajena encima en vez de un grano coherente más grande.
+- Verificado con un campo gris uniforme, grano al máximo: 0.3× da grano fino y apretado, 3× da grumos claramente más grandes con su propia textura interna. Sin errores de consola, 23 tests siguen pasando.
+- Pendiente del bloque de controles nuevos: desplegable de papeles (en vez del checkbox), botón de reset por slider, undo/redo.
+
+## 2026-07-29 (continuación — Saturación y viveza, primer punto del bloque de controles nuevos)
+- Añadidos los sliders "Saturación" y "Viveza" (nueva sección Color, entre Tono y Grano y nitidez). Aplicados en las DOS etapas finales del pipeline (`scannerPaper.wgsl` y `previewEncode.wgsl`) — sobre el color ya revelado, justo antes de codificar a sRGB, no en el motor físico. La viveza protege los colores que ya están saturados (no sobre-satura pieles), igual que en editores conocidos.
+- Verificado con parches de color sintéticos: -100 da blanco y negro, +100 intensifica claramente, viveza da un efecto más sutil y selectivo. Probado también con el papel desactivado (checkbox de comparación) para confirmar que el resultado es consistente en ambos modos. Sin errores de consola, 23 tests siguen pasando.
+- Pendiente del bloque de controles nuevos: tamaño de grano, desplegable de papeles (en vez del checkbox), botón de reset por slider, undo/redo.
+
+## 2026-07-29 (continuación — Suavizado óptico, último punto del bloque "afinar el look")
+- Añadido el slider "Suavizado" (0×-2×, sección Grano y nitidez). Nuevo pass `opticalSoftening.wgsl` insertado antes del halation (después del balance de blanco/zonas): mezcla la imagen con una versión ligeramente difuminada de sí misma, representando el límite de resolución de cualquier objetivo+película real — que las imágenes de IA no tienen, de ahí el aspecto "crispy" que reportó el usuario.
+- Deliberadamente distinto y separado de la acutancia (que sigue igual, después de la curva): uno suaviza antes de que la luz entre al sistema, el otro realza bordes después de revelar. Reutiliza el blur gaussiano ya existente (`gaussianBlur.wgsl`), mismo patrón de composite que halation/acutancia.
+- Verificado con una imagen sintética con ruido de alta frecuencia y líneas finas: a 0× se ve crudo, a 2× claramente suavizado. Sin errores de consola, 23 tests siguen pasando.
+- Con esto se completan los cinco puntos del bloque "afinar el look" (temperatura del papel, exposición por defecto, halation, grano rediseñado, suavizado óptico). Pendiente: probar todo junto con más fotos reales del usuario, y seguir con el siguiente bloque acordado (controles nuevos: saturación/viveza, tamaño de grano, desplegable de papeles, reset por slider, undo/redo).
+- **Bug encontrado por el usuario probando en vivo:** el suavizado también apagaba el grano en zonas con detalle — no debía (grano y suavizado tienen que ser controles independientes). Arreglado dándole al grano su propia referencia de densidad sin suavizar solo para decidir cuánto grano mostrar en cada zona (la perturbación de grano sigue sumándose sobre la imagen ya suavizada). Detalle técnico completo, incluida una simplificación consciente sobre el halation, en `decisions.md`. Verificado con la foto de referencia real: grano igual de presente en 0× y 2× de suavizado, mientras el suavizado del tono/contorno de la piel se sigue notando. 23 tests siguen pasando.
+
+## 2026-07-29 (continuación — Rediseño del grano con foto de referencia real)
+- El usuario guardó su foto de referencia (crop real de Portra 400) en `docs/reference/portra400-grain-reference.jpg`.
+- Analizado con un script Python (numpy/PIL) fuera del proyecto: filtro paso-alto + autocorrelación por FFT sobre varios parches de piel en foco, para estimar el tamaño aparente del grano real en píxeles. Resultado: el grano real mide bastante más (~3×) que el tamaño que usaba el motor.
+- Redi­señado `src/shaders/grain.wgsl`: el ruido ya no es una sola capa suave (`valueNoise`, aspecto de nube difusa) — ahora se combina con una capa de ruido crudo sin interpolar de tamaño fijo pequeño, para dar la textura "arenosa" del grano fotoquímico real. Tamaños por canal escalados en `main.ts` (`GRAIN_SIZE_FRACTION`).
+- Verificado cargando la propia foto de referencia en la app (a 100% de zoom, mismo tamaño de píxel que el archivo original) y comparando visualmente el grano simulado contra el real en la misma zona de piel — ahora se leen mucho más parecidos que antes. Sin errores de consola, 23 tests siguen pasando. Detalle completo, incluida la honestidad sobre los límites de esta medición (JPEG comprimido, no datasheet), en `decisions.md`.
+- Pendiente: el usuario dijo que el renderizador de grano riguroso está roto y lo dejamos para el final — este rediseño solo afecta al grano en tiempo real (preview). Seguir con el resto del bloque "afinar el look" (blur sutil para quitar el aspecto plástico de IA), y confirmar con una foto real todos los ajustes de esta sesión y la anterior.
+
+## 2026-07-29 — Slider de intensidad de halation
+- Añadido el slider "Halation" en la sección Tono (0×–3×, por defecto 1.0×). El shader `addHalation.wgsl` ya no tiene la intensidad fija en una constante (`HALATION_INTENSITY = 0.65`); ahora recibe ese valor por uniform (`HalationParams`), controlado desde `main.ts` igual que grano/acutancia (multiplicador × intensidad base).
+- Verificado en el navegador con una escena nocturna sintética (punto de luz sobre fondo oscuro): en 0× el halo desaparece por completo, en 1× se ve como antes, en 3× es mucho más intenso. Sin errores de consola, 23 tests siguen pasando.
+- Pendiente: seguir con el resto del bloque "afinar el look" (rediseño del grano con la foto de referencia del usuario, blur sutil para quitar el aspecto plástico de IA), y confirmar con una foto real los tres ajustes ya hechos (temperatura del papel, exposición por defecto, intensidad de halation).
+
+## 2026-07-28 (continuación — Feedback de la primera foto real + slider de temperatura del papel)
+- El usuario probó la app con una foto real suya (retrato, crop de ojo/oreja) y mandó una lista de 17 puntos de feedback. Organizados con él en bloques: bugs urgentes, afinar el look físico, controles nuevos de edición, flujo de trabajo de la app, y una decisión aparte sobre banding a 16 bits. A petición del usuario, se saca de la lista el renderizador de grano riguroso (roto) y se deja para el final.
+- Implementado el primer punto del bloque "afinar el look": slider "Temperatura del papel" en la sección Salida. Reutiliza el mecanismo de calibración de canal que ya existía (offsets que alinean los tres canales en gris neutro) en vez de crear un mecanismo nuevo — detalle técnico y una nota importante sobre sus límites en `decisions.md`.
+- Verificado en el navegador con una imagen sintética (gradiente cálido + parche gris + punto brillante): el slider mueve claramente la imagen entre azulado (-100) y tostado (+100), sin errores de consola. Los 23 tests siguen pasando.
+- Recalibrada la exposición por defecto de 0.0 a -0.7 pasos (`DEFAULT_EXPOSURE_STOPS` en `main.ts`, sincronizado con el valor inicial del slider en `index.html`). El usuario reportó que por defecto la imagen sale casi 1 punto sobreexpuesta y que normalmente baja entre -0.5 y -1; -0.7 es el punto medio de ese rango. Causa de fondo documentada en `decisions.md`: las imágenes de entrada llegan ya "reveladas" para pantalla, no como una captura lineal real, así que su tono medio aparente no coincide con el gris de referencia de la curva del negativo — la solución definitiva es la reconstrucción de altas luces por IA de la Fase 7, esto es un parche de calibración mientras tanto.
+- Verificado visualmente con una imagen sintética con una zona de luz clara tipo piel: a 0 pasos se ve lavada/blanca, a -0.7 conserva más color y detalle. Sin errores de consola, 23 tests siguen pasando.
+- Pendiente: seguir con el resto del bloque "afinar el look" (slider de intensidad de halation, rediseño del grano con la foto de referencia del usuario, blur sutil), y sobre todo, probar los dos ajustes de hoy (temperatura del papel + exposición por defecto) con la foto real para confirmar si resuelven sus quejas o si hace falta ir más a fondo.
+
+## 2026-07-28 (continuación — Subida a GitHub y despliegue en Vercel)
+- Renombrado el proyecto como **NW-FILM** también dentro de la app (título de pestaña y cabecera), a petición del usuario. `package.json` mantiene el nombre técnico en minúsculas (`nw-film`) porque npm no admite mayúsculas.
+- Inicializado el repositorio Git local y hecho el primer commit con todo el proyecto (motor físico + interfaz Fase 6).
+- Intento fallido de crear el repositorio en GitHub vía API extrayendo la credencial guardada en el Llavero de macOS con `security find-internet-password -w`: esto disparó un aviso nativo de macOS pidiendo la contraseña del Mac (no de GitHub) para autorizar el acceso, lo cual confundió al usuario. Se abandonó ese enfoque — ver `decisions.md`.
+- El usuario creó el repositorio vacío y privado `nw-film` manualmente desde github.com. Con eso, `git push` funcionó a la primera y sin ningún aviso, usando el credential helper de git ya autorizado en esta Mac de sesiones anteriores.
+- Indicados al usuario los pasos para desplegar en Vercel (importar el repo desde el dashboard, sin tocar configuración — Vercel detecta Vite solo). Pendiente de que el usuario confirme que lo completó.
+- Pendiente: confirmar el despliegue en Vercel, luego seguir con feedback de una foto real.
+
 ## 2026-07-28 (continuación — Interfaz tipo Camera Raw, Fase 6)
 - Planificado y aprobado con el usuario un cambio de alcance completo (no solo maquetar, también dejar funcionando los controles nuevos) y zoom por slider+arrastre (no lupa).
 - Layout nuevo: cabecera + visor de imagen flexible + barra lateral fija con controles agrupados en secciones (Balance de blanco, Tono, Grano y nitidez, Salida) — sustituye la vista de depuración lado a lado.

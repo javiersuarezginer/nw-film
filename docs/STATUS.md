@@ -1,29 +1,40 @@
-# STATUS — 2026-07-28
+# STATUS — 2026-07-29
 
 ## Estado general
-Motor físico completo (halation, curva Portra 400, grano, acutancia, papel Endura, grano riguroso para export) + primera versión funcional de la interfaz tipo Camera Raw (Fase 6): barra lateral agrupada, visor con zoom/arrastre, botón Original/Editada, y 6 controles nuevos de gradado (temperatura, matiz, luces, sombras, blancos, negros) funcionando de verdad en el motor. Verificado en el navegador con una imagen sintética; pendiente probar con una foto real del usuario.
+Motor físico completo + interfaz tipo Camera Raw funcional (Fase 6). El proyecto ya está en GitHub, privado, como **NW-FILM** (repo `javiersuarezginer/nw-film`), con despliegue en Vercel indicado (pendiente de confirmar que el usuario lo completó).
+
+El usuario probó la app con su primera foto real y mandó una lista de 17 puntos de feedback, organizados con él en un orden de trabajo (ver `progress.md` para el detalle completo y `decisions.md` para el orden acordado). El renderizador de grano riguroso está roto y se deja explícitamente para el final, a petición del usuario.
+
+**Los cuatro bloques de feedback ya están completos: "afinar el look", "controles nuevos" (undo/redo aparcado a petición del usuario) y "flujo de trabajo".** Solo quedan dos cosas de la lista original del usuario: decidir el enfoque del banding a 16 bits, y arreglar el renderizador de grano riguroso (dejado deliberadamente para el final).
 
 ## Último trabajo realizado
-- **Interfaz tipo Camera Raw** (`index.html`, `src/style.css`, `src/main.ts`):
-  - Layout nuevo: cabecera, visor de imagen a la izquierda (flexible) + barra lateral fija a la derecha con controles agrupados en secciones (Balance de blanco, Tono, Grano y nitidez, Salida).
-  - Zoom con slider (10%–500%) + arrastre con el ratón (estilo Lightroom, no lupa — elegido por el usuario). Botón "Ajustar" calcula el porcentaje que encaja la imagen en el visor. Se reajusta automáticamente al cargar una imagen o redimensionar la ventana.
-  - Botón "Ver original"/"Ver editada" (A/B): alterna entre el canvas del bitmap original y el resultado del pipeline, reutilizando el mismo `canvas-stack` (comparten zoom/arrastre sin duplicar lógica).
-- **Motor: 6 controles nuevos** (temperatura, matiz, luces, sombras, blancos, negros) — no existían antes, se implementaron de verdad:
-  - Nuevo pass `src/shaders/sceneGrade.wgsl`, insertado entre `decodeLinear` y el halation (en lineal, antes de cualquier física de la película — ver `decisions.md`).
-  - Balance de blanco: ganancia multiplicativa simple. Zonas tonales: offset en dominio log (stops relativos al gris medio) ponderado por una máscara `smoothstep` — ancha para luces/sombras, estrecha en los extremos para blancos/negros. Un solo mecanismo reutilizado para los 4 controles.
-  - La exposición (ya existente) no se tocó — sigue en `characteristicCurve.wgsl`, solo se reubicó visualmente.
-- Verificado en el navegador embebido con una imagen sintética (cielo con degradado, punto brillante para halation, cartón gris y parches de color): cada slider nuevo produce el efecto esperado (temperatura cambia la dominante de color, luces/sombras oscurecen su zona, A/B alterna correctamente, zoom/arrastre/ajustar funcionan, sin errores de consola). Regresión comprobada: exposición, grano, acutancia y papel Endura siguen funcionando igual que antes.
-- Los 23 tests existentes siguen pasando (no se tocó color science).
+- Quitada la leyenda técnica del estado ("Imagen WxH. Halation + curva...") tras cargar una imagen — quedaba de las primeras fases de depuración visual del proyecto. Los demás mensajes de estado (cargando, errores, progreso) se mantienen.
+- Botón "Lado a lado": el visor ahora tiene dos paneles reales (original y editada), que en modo normal siguen superpuestos como antes pero con el botón nuevo se reparten el ancho para verlos los dos a la vez, con zoom/arrastre sincronizados.
+- Zoom con gesto de pellizco (pinch) en trackpad sobre el visor — detectado como `wheel` + `ctrlKey` (la forma estándar en que los navegadores entregan ese gesto), sincronizado con el slider de zoom existente.
+- Botón "Exportar" en la barra de herramientas: descarga como PNG el preview en tiempo real (o el render riguroso si ya se hizo), sin depender de renderizar el grano riguroso primero.
+- Eliminada la pantalla de bienvenida (`#dropzone`); el editor completo (menús, sliders, visor) está siempre visible desde el arranque. Nuevo botón "Abrir imagen". El arrastrar-soltar funciona sobre todo el visor, para primera carga y para reemplazar la imagen en cualquier momento.
+- Verificado cada cambio en el navegador. Sin errores de consola, 23 tests siguen pasando.
 
 ## Próxima acción
-1. Probar con una foto real del usuario (pendiente desde la sesión anterior).
-2. Recoger feedback visual sobre los controles nuevos (fuerza de temperatura/matiz, anchura de las zonas de luces/sombras/blancos/negros — hay constantes ajustables en `sceneGrade.wgsl` si algo se nota demasiado fuerte o débil).
-3. Posibles pulidos de la interfaz: límites al arrastre (hoy no tiene, se puede arrastrar la imagen fuera de vista), selector de nivel de zoom con teclado o rueda del ratón.
+1. Decidir con el usuario el enfoque para el banding a 16 bits: dithering (más simple) vs. salida de mayor precisión (más ambicioso, no garantizado en todos los navegadores).
+2. Al final: diagnosticar y arreglar el renderizador de grano riguroso (roto, bug confirmado por el usuario) — y revisar si debe heredar el suavizado óptico, el tamaño de grano nuevo, y la saturación/viveza del preview.
+3. Confirmar que el despliegue en Vercel se completó.
+4. Cuando haya ocasión: probar todos los ajustes del bloque "afinar el look" con más fotos reales del usuario.
+2. Decidir el enfoque para el banding a 16 bits (dithering vs. salida de mayor precisión).
+3. Al final: arreglar el renderizador de grano riguroso (roto actualmente) — revisar si debe heredar el suavizado óptico decoplado, la misma proporción de tamaño de grano, y la saturación/viveza del preview.
+4. Confirmar que el despliegue en Vercel se completó.
+5. Cuando haya ocasión: probar todos los ajustes del bloque "afinar el look" con más fotos reales del usuario.
+6. Si el usuario retoma undo/redo más adelante: no hay nada empezado, se plantea desde cero.
 
 ## Blockers
 Ninguno.
 
 ## Para revisar
-- El grano riguroso en imágenes muy pequeñas (tests sintéticos) se ve un poco fuerte/grueso — con fotos reales de mayor resolución debería verse más fino, pero conviene confirmarlo y quizás ajustar la intensidad por defecto.
-- Rendimiento del grano riguroso en imágenes grandes (varios MP) no probado todavía.
-- Blancos/negros probados solo visualmente en una imagen sin negros/blancos puros reales — confirmar con una foto real que la zona "estrecha" de la máscara está bien calibrada.
+- El grano riguroso no funciona (bug confirmado por el usuario, pendiente de diagnosticar — deliberadamente para el final). Ninguno de los cambios de esta sesión lo toca (todos son del preview en tiempo real); cuando se arregle, revisar si debe incorporar suavizado óptico, saturación/viveza, y la nueva forma de decidir visibilidad de grano.
+- El slider de temperatura del papel corrige de forma uniforme en todo el rango tonal; si la calidez en luces altas de una foto real no se controla bien con él, revisar la calibración de canal.
+- La exposición por defecto de -0.7 es un parche de calibración, no la solución de fondo — reevaluar cuando llegue la Fase 7 de reconstrucción de altas luces por IA.
+- El slider de halation solo controla la intensidad, no su radio/tamaño.
+- El tamaño de grano se calibró con UNA foto de referencia comprimida (JPEG, no datasheet) — puede necesitar ajuste fino con más fotos reales.
+- La referencia de densidad que usa el grano para decidir su visibilidad (`densityRef`) no incluye el halation (por coste) — si se nota el grano raro específicamente en zonas de halo, revisar eso (ver `decisions.md`).
+- Banding en sombras/negros a 8 bits — pendiente decidir dithering vs. mayor profundidad de salida.
+- Blancos/negros y demás controles de `sceneGrade.wgsl` probados solo visualmente en sintético — confirmar con foto real.

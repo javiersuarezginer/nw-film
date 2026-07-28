@@ -7,12 +7,9 @@
   </head>
   <body>
     <div id="app">
-      <div id="dropzone">
-        <p>Arrastra una imagen aquí (o haz clic para elegir un archivo)</p>
-        <input id="file-input" type="file" accept="image/*" hidden />
-      </div>
+      <input id="file-input" type="file" accept="image/*" hidden />
 
-      <div id="editor" hidden>
+      <div id="editor">
         <header id="app-header">
           <span>NW-FILM</span>
           <span id="status"></span>
@@ -21,7 +18,10 @@
         <div id="editor-body">
           <div id="viewport">
             <div id="toolbar">
+              <button id="open-button" type="button">Abrir imagen</button>
+              <button id="export-button" type="button">Exportar</button>
               <button id="ab-toggle" type="button">Ver original</button>
+              <button id="side-by-side-toggle" type="button">Lado a lado</button>
               <div id="zoom-controls">
                 <label for="zoom-slider">Zoom <span id="zoom-value">100</span>%</label>
                 <input id="zoom-slider" type="range" min="10" max="500" step="1" value="100" />
@@ -30,10 +30,21 @@
             </div>
 
             <div id="viewport-frame">
-              <div class="canvas-stack">
-                <canvas id="canvas-original" hidden></canvas>
-                <canvas id="canvas-processed"></canvas>
-                <canvas id="canvas-rendered" hidden></canvas>
+              <div id="empty-state">
+                <p>Arrastra una imagen aquí, o usa "Abrir imagen"</p>
+              </div>
+              <div id="canvas-panes" hidden>
+                <div class="canvas-pane" id="pane-original">
+                  <div class="canvas-stack">
+                    <canvas id="canvas-original"></canvas>
+                  </div>
+                </div>
+                <div class="canvas-pane" id="pane-processed">
+                  <div class="canvas-stack">
+                    <canvas id="canvas-processed"></canvas>
+                    <canvas id="canvas-rendered" hidden></canvas>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -41,64 +52,143 @@
           <aside id="sidebar">
             <section class="control-section">
               <h3>Balance de blanco</h3>
-              <label for="temperature-slider">
-                Temperatura: <span id="temperature-value">0</span>
-              </label>
+              <div class="slider-header">
+                <label for="temperature-slider">
+                  Temperatura: <span id="temperature-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="temperature-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
               <input id="temperature-slider" type="range" min="-100" max="100" step="1" value="0" />
 
-              <label for="tint-slider">
-                Matiz: <span id="tint-value">0</span>
-              </label>
+              <div class="slider-header">
+                <label for="tint-slider">
+                  Matiz: <span id="tint-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="tint-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
               <input id="tint-slider" type="range" min="-100" max="100" step="1" value="0" />
             </section>
 
             <section class="control-section">
               <h3>Tono</h3>
-              <label for="exposure-slider">
-                Exposición: <span id="exposure-value">0.0</span> pasos
-              </label>
-              <input id="exposure-slider" type="range" min="-3" max="3" step="0.1" value="0" />
+              <div class="slider-header">
+                <label for="exposure-slider">
+                  Exposición: <span id="exposure-value">-0.7</span> pasos
+                </label>
+                <button type="button" class="reset-btn" data-reset="exposure-slider" data-default="-0.7" title="Restablecer">↺</button>
+              </div>
+              <input id="exposure-slider" type="range" min="-3" max="3" step="0.1" value="-0.7" />
 
-              <label for="highlights-slider">
-                Luces: <span id="highlights-value">0</span>
-              </label>
+              <div class="slider-header">
+                <label for="highlights-slider">
+                  Luces: <span id="highlights-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="highlights-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
               <input id="highlights-slider" type="range" min="-100" max="100" step="1" value="0" />
 
-              <label for="shadows-slider">
-                Sombras: <span id="shadows-value">0</span>
-              </label>
+              <div class="slider-header">
+                <label for="shadows-slider">
+                  Sombras: <span id="shadows-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="shadows-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
               <input id="shadows-slider" type="range" min="-100" max="100" step="1" value="0" />
 
-              <label for="whites-slider">
-                Blancos: <span id="whites-value">0</span>
-              </label>
+              <div class="slider-header">
+                <label for="whites-slider">
+                  Blancos: <span id="whites-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="whites-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
               <input id="whites-slider" type="range" min="-100" max="100" step="1" value="0" />
 
-              <label for="blacks-slider">
-                Negros: <span id="blacks-value">0</span>
-              </label>
+              <div class="slider-header">
+                <label for="blacks-slider">
+                  Negros: <span id="blacks-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="blacks-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
               <input id="blacks-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <div class="slider-header">
+                <label for="halation-slider">
+                  Halation: <span id="halation-value">1.00</span>×
+                </label>
+                <button type="button" class="reset-btn" data-reset="halation-slider" data-default="1" title="Restablecer">↺</button>
+              </div>
+              <input id="halation-slider" type="range" min="0" max="3" step="0.1" value="1" />
+            </section>
+
+            <section class="control-section">
+              <h3>Color</h3>
+              <div class="slider-header">
+                <label for="saturation-slider">
+                  Saturación: <span id="saturation-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="saturation-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
+              <input id="saturation-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <div class="slider-header">
+                <label for="vibrance-slider">
+                  Viveza: <span id="vibrance-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="vibrance-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
+              <input id="vibrance-slider" type="range" min="-100" max="100" step="1" value="0" />
             </section>
 
             <section class="control-section">
               <h3>Grano y nitidez</h3>
-              <label for="grain-slider">
-                Grano: <span id="grain-value">1.0</span>×
-              </label>
+              <div class="slider-header">
+                <label for="grain-slider">
+                  Grano: <span id="grain-value">1.0</span>×
+                </label>
+                <button type="button" class="reset-btn" data-reset="grain-slider" data-default="1" title="Restablecer">↺</button>
+              </div>
               <input id="grain-slider" type="range" min="0" max="2.5" step="0.05" value="1" />
 
-              <label for="acutance-slider">
-                Acutancia: <span id="acutance-value">1.00</span>×
-              </label>
+              <div class="slider-header">
+                <label for="grain-size-slider">
+                  Tamaño de grano: <span id="grain-size-value">1.00</span>×
+                </label>
+                <button type="button" class="reset-btn" data-reset="grain-size-slider" data-default="1" title="Restablecer">↺</button>
+              </div>
+              <input id="grain-size-slider" type="range" min="0.3" max="3" step="0.1" value="1" />
+
+              <div class="slider-header">
+                <label for="acutance-slider">
+                  Acutancia: <span id="acutance-value">1.00</span>×
+                </label>
+                <button type="button" class="reset-btn" data-reset="acutance-slider" data-default="1" title="Restablecer">↺</button>
+              </div>
               <input id="acutance-slider" type="range" min="0" max="3" step="0.1" value="1" />
+
+              <div class="slider-header">
+                <label for="softening-slider">
+                  Suavizado: <span id="softening-value">1.00</span>×
+                </label>
+                <button type="button" class="reset-btn" data-reset="softening-slider" data-default="1" title="Restablecer">↺</button>
+              </div>
+              <input id="softening-slider" type="range" min="0" max="2" step="0.1" value="1" />
             </section>
 
             <section class="control-section">
               <h3>Salida</h3>
-              <label class="checkbox-label">
-                <input id="paper-toggle" type="checkbox" checked />
-                Simulación de papel Portra Endura (si no, vista previa plana)
-              </label>
+              <label for="paper-select">Papel</label>
+              <select id="paper-select">
+                <option value="endura" selected>Portra Endura</option>
+                <option value="none">Ninguno (vista previa plana)</option>
+              </select>
+
+              <div class="slider-header">
+                <label for="paper-temperature-slider">
+                  Temperatura del papel: <span id="paper-temperature-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="paper-temperature-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
+              <input id="paper-temperature-slider" type="range" min="-100" max="100" step="1" value="0" />
 
               <div id="render-controls">
                 <button id="render-button" type="button">Renderizar grano riguroso</button>

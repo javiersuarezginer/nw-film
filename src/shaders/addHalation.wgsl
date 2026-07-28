@@ -29,13 +29,17 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
 @group(0) @binding(2) var glowTexture: texture_2d<f32>;
 @group(0) @binding(3) var glowSampler: sampler;
 
+struct HalationParams {
+  intensity: f32,
+};
+
 // Intensidad artística del halo — no viene de un datasheet (ver
-// halationSource.wgsl). Ajustable a ojo hasta que haya UI de parámetros.
-const HALATION_INTENSITY: f32 = 0.65;
+// halationSource.wgsl). Controlada por el slider de la interfaz.
+@group(0) @binding(4) var<uniform> params: HalationParams;
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let base = textureSample(baseTexture, baseSampler, in.uv);
   let glow = textureSample(glowTexture, glowSampler, in.uv);
-  return vec4<f32>(base.rgb + glow.rgb * HALATION_INTENSITY, base.a);
+  return vec4<f32>(base.rgb + glow.rgb * params.intensity, base.a);
 }

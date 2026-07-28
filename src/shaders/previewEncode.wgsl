@@ -33,8 +33,8 @@ struct PreviewParams {
   dMaxR: f32,
   dMaxG: f32,
   dMaxB: f32,
-  pad0: f32,
-  pad1: f32,
+  saturation: f32,
+  vibrance: f32,
 };
 
 @group(0) @binding(0) var densityTexture: texture_2d<f32>;
@@ -48,6 +48,17 @@ fn linearToSrgb(c: vec3<f32>) -> vec3<f32> {
   return select(higher, lower, cutoff);
 }
 
+// Ver scannerPaper.wgsl — misma lógica de saturación/viveza, duplicada
+// porque cada etapa final codifica su propio sRGB por separado.
+fn applySaturationVibrance(color: vec3<f32>, saturation: f32, vibrance: f32) -> vec3<f32> {
+  let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+  let maxC = max(color.r, max(color.g, color.b));
+  let minC = min(color.r, min(color.g, color.b));
+  let currentSat = (maxC - minC) / max(maxC, 1e-4);
+  let boost = saturation + vibrance * (1.0 - currentSat);
+  return mix(vec3<f32>(luma), color, 1.0 + boost);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let density = textureSample(densityTexture, densitySampler, in.uv);
@@ -57,5 +68,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let previewB = (density.b - params.dMinB) / (params.dMaxB - params.dMinB);
   let preview = clamp(vec3<f32>(previewR, previewG, previewB), vec3<f32>(0.0), vec3<f32>(1.0));
 
-  return vec4<f32>(linearToSrgb(preview), density.a);
+  let graded = applySaturationVibrance(preview, params.saturation, params.vibrance);
+
+  return vec4<f32>(linearToSrgb(clamp(graded, vec3<f32>(0.0), vec3<f32>(1.0))), density.a);
 }

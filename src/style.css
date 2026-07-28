@@ -20,32 +20,11 @@ body {
   display: flex;
 }
 
-#dropzone {
-  margin: auto;
-  width: 100%;
-  max-width: 600px;
-  padding: 3rem;
-  border: 2px dashed #555;
-  border-radius: 8px;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-#dropzone.dragover {
-  border-color: #4ea1ff;
-  background: rgba(78, 161, 255, 0.08);
-}
-
 #editor {
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
-}
-
-#editor[hidden] {
-  display: none;
 }
 
 #app-header {
@@ -95,7 +74,10 @@ body {
   width: 140px;
 }
 
+#open-button,
+#export-button,
 #ab-toggle,
+#side-by-side-toggle,
 #fit-button,
 #render-button,
 #download-button {
@@ -108,16 +90,25 @@ body {
   cursor: pointer;
 }
 
+#open-button:hover,
+#export-button:hover,
 #ab-toggle:hover,
+#side-by-side-toggle:hover,
 #fit-button:hover,
 #render-button:hover,
 #download-button:hover {
   border-color: #4ea1ff;
 }
 
-#ab-toggle.active {
+#ab-toggle.active,
+#side-by-side-toggle.active {
   border-color: #4ea1ff;
   color: #4ea1ff;
+}
+
+#ab-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 #render-button:disabled {
@@ -131,6 +122,62 @@ body {
   overflow: hidden;
   background: #000;
   min-height: 0;
+  transition: background 0.15s;
+}
+
+#viewport-frame.dragover {
+  background: rgba(78, 161, 255, 0.08);
+}
+
+#empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #666;
+  padding: 2rem;
+  cursor: pointer;
+}
+
+#empty-state[hidden] {
+  display: none;
+}
+
+#canvas-panes {
+  position: absolute;
+  inset: 0;
+}
+
+#canvas-panes[hidden] {
+  display: none;
+}
+
+.canvas-pane {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.canvas-pane[hidden] {
+  display: none;
+}
+
+/* Modo lado a lado: los dos paneles pasan de superpuestos a repartirse el
+   ancho a partes iguales, cada uno con su propio recorte. */
+#canvas-panes.side-by-side {
+  display: flex;
+}
+
+#canvas-panes.side-by-side .canvas-pane {
+  position: relative;
+  inset: auto;
+  flex: 1;
+}
+
+#canvas-panes.side-by-side #pane-original {
+  border-right: 1px solid #2a2a2a;
 }
 
 .canvas-stack {
@@ -184,9 +231,52 @@ body {
   margin-top: 0.6rem;
 }
 
+.slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.slider-header label {
+  margin-top: 0;
+  flex: 1;
+}
+
+.reset-btn {
+  flex-shrink: 0;
+  width: 1.4rem;
+  height: 1.4rem;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid #333;
+  border-radius: 50%;
+  background: #1a1a1a;
+  color: #999;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.reset-btn:hover {
+  color: #eee;
+  border-color: #555;
+}
+
 .control-section input[type="range"] {
   width: 100%;
   margin-top: 0.2rem;
+}
+
+.control-section select {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.4rem;
+  background: #1a1a1a;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 0.85rem;
 }
 
 .checkbox-label {

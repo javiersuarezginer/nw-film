@@ -50,6 +50,10 @@ struct ScannerPaperParams {
   paperLutWidth: f32,
   paperDMin: f32,
   paperDMax: f32,
+  saturation: f32,
+  vibrance: f32,
+  pad0: f32,
+  pad1: f32,
 };
 
 @group(0) @binding(0) var densityTexture: texture_2d<f32>;
@@ -80,6 +84,22 @@ fn linearToSrgb(c: vec3<f32>) -> vec3<f32> {
   return select(higher, lower, cutoff);
 }
 
+// Saturación/viveza — ajuste digital de la salida (como el retoque
+// tradicional de un escáner o de la impresión, ya no física del propio
+// negativo), aplicado en lineal sobre la imagen positiva ya revelada,
+// justo antes de codificar a sRGB. La viveza refuerza más los colores
+// que ya están poco saturados (protege pieles/tonos ya intensos) — misma
+// idea que "Vibrance" en editores conocidos. No hay dato de datasheet
+// para esto, es puro ajuste de herramienta de edición.
+fn applySaturationVibrance(color: vec3<f32>, saturation: f32, vibrance: f32) -> vec3<f32> {
+  let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+  let maxC = max(color.r, max(color.g, color.b));
+  let minC = min(color.r, min(color.g, color.b));
+  let currentSat = (maxC - minC) / max(maxC, 1e-4);
+  let boost = saturation + vibrance * (1.0 - currentSat);
+  return mix(vec3<f32>(luma), color, 1.0 + boost);
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let negDensity = textureSample(densityTexture, densitySampler, in.uv);
@@ -100,5 +120,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let normG = 1.0 - clamp((paperDg - params.paperDMin) / span, 0.0, 1.0);
   let normB = 1.0 - clamp((paperDb - params.paperDMin) / span, 0.0, 1.0);
 
-  return vec4<f32>(linearToSrgb(vec3<f32>(normR, normG, normB)), negDensity.a);
+  let graded = applySaturationVibrance(vec3<f32>(normR, normG, normB), params.saturation, params.vibrance);
+
+  return vec4<f32>(linearToSrgb(clamp(graded, vec3<f32>(0.0), vec3<f32>(1.0))), negDensity.a);
 }

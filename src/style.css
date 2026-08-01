@@ -312,10 +312,6 @@ body {
   border-color: #4ea1ff;
 }
 
-#preset-intensity-slider:disabled {
-  opacity: 0.4;
-}
-
 #render-controls {
   margin-top: 1rem;
   display: flex;

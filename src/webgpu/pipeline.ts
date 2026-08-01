@@ -111,6 +111,34 @@ export class Pipeline {
   }
 
   /**
+   * Como `displayFinal`, pero escribe en una textura EXTERNA (no
+   * gestionada por el pipeline, y no necesariamente en su mismo formato
+   * interno) en vez del canvas. Pensado para poder posprocesar ese
+   * resultado — por ejemplo mezclarlo con la foto original — antes de
+   * mostrarlo en pantalla.
+   */
+  renderFinalToTexture(pass: Pass, inputNames: string[], outputTexture: GPUTexture): void {
+    const inputTextures = inputNames.map((name) =>
+      this.getOrCreateTexture(name, this.size.width, this.size.height)
+    );
+    const encoder = this.device.createCommandEncoder({ label: "pipeline-final-to-texture-encoder" });
+    pass.execute(encoder, inputTextures, outputTexture.createView());
+    this.device.queue.submit([encoder.finish()]);
+  }
+
+  /**
+   * Como `displayFinal`, pero con texturas de entrada explícitas en vez
+   * de nombres internos — para el paso final que mezcla el resultado ya
+   * revelado con la foto original (que no vive en el pool de texturas
+   * con nombre del pipeline).
+   */
+  displayFinalWithTextures(pass: Pass, inputs: GPUTexture[], canvasContext: GPUCanvasContext): void {
+    const encoder = this.device.createCommandEncoder({ label: "pipeline-final-blend-encoder" });
+    pass.execute(encoder, inputs, canvasContext.getCurrentTexture().createView());
+    this.device.queue.submit([encoder.finish()]);
+  }
+
+  /**
    * Lee de vuelta a la CPU una textura interna ya calculada (formato
    * rgba16float). Pensado para pasarle datos de densidad al Web Worker
    * del render riguroso — algo que solo hace falta al pulsar "Renderizar",

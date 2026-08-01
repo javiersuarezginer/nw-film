@@ -53,19 +53,27 @@
 
           <aside id="sidebar">
             <section class="control-section">
+              <h3>Película</h3>
+              <label for="film-select">Emulsión</label>
+              <select id="film-select">
+                <option value="portra400" selected>Kodak Portra 400</option>
+              </select>
+
+              <div class="slider-header">
+                <label for="look-intensity-slider">
+                  Intensidad: <span id="look-intensity-value">100</span>%
+                </label>
+              </div>
+              <input id="look-intensity-slider" type="range" min="0" max="100" step="1" value="100" />
+            </section>
+
+            <section class="control-section">
               <h3>Preset</h3>
               <div id="preset-buttons">
                 <button id="preset-import-button" type="button" class="panel-btn">Importar preset</button>
                 <button id="preset-export-button" type="button" class="panel-btn">Exportar preset</button>
               </div>
               <input id="preset-file-input" type="file" accept="application/json,.json" hidden />
-
-              <div class="slider-header">
-                <label for="preset-intensity-slider">
-                  Intensidad del preset: <span id="preset-intensity-value">100</span>%
-                </label>
-              </div>
-              <input id="preset-intensity-slider" type="range" min="0" max="100" step="1" value="100" disabled />
             </section>
 
             <section class="control-section">

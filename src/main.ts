@@ -16,6 +16,7 @@ import acutanceShader from "./shaders/acutance.wgsl?raw";
 import opticalSofteningShader from "./shaders/opticalSoftening.wgsl?raw";
 import previewEncodeShader from "./shaders/previewEncode.wgsl?raw";
 import scannerPaperShader from "./shaders/scannerPaper.wgsl?raw";
+import lookIntensityShader from "./shaders/lookIntensity.wgsl?raw";
 import { buildCurveLUT, sampleDensity, PORTRA_400_SOURCE, type CurveLUT } from "./color-science/portra400/characteristicCurve";
 import { buildPaperLUT, PAPER_DENSITY_MIN, PAPER_DENSITY_MAX } from "./color-science/portraEndura/paperCurve";
 import type { RigorousRenderParams } from "./render/rigorousRender";
@@ -43,6 +44,7 @@ const ACUTANCE_PARAMS_FLOATS = 4; // debe coincidir con el struct AcutanceParams
 const HALATION_PARAMS_FLOATS = 4; // debe coincidir con el struct HalationParams del shader
 const SOFTENING_PARAMS_FLOATS = 4; // debe coincidir con el struct SofteningParams del shader
 const SCENE_GRADE_PARAMS_FLOATS = 8; // debe coincidir con el struct SceneGradeParams del shader
+const LOOK_INTENSITY_PARAMS_FLOATS = 4; // debe coincidir con el struct LookIntensityParams del shader
 
 const ZOOM_MIN_PERCENT = 10;
 const ZOOM_MAX_PERCENT = 500;
@@ -97,12 +99,14 @@ const RIGOROUS_SAMPLES_PER_PIXEL = 32;
 // --- Presets (look) ---
 // Un preset es una "receta" plana de todos los sliders físicos del look
 // (no incluye zoom/pan/comparación, que son estado de interfaz, ni el
-// render riguroso, que se dispara aparte). `paper` se aplica siempre al
-// 100% al importar (es una elección discreta de papel, no algo que tenga
-// sentido mezclar a medias); el resto de campos se interpolan entre estos
-// valores por defecto y los del preset según el slider de intensidad.
-// Deben coincidir con los valores por defecto de los sliders en index.html
-// (mismo patrón que DEFAULT_EXPOSURE_STOPS más arriba).
+// render riguroso, que se dispara aparte). Al importar, se aplica entero
+// tal cual — la "intensidad del preset" NO interpola estos valores; mezcla
+// el RESULTADO final (ya revelado con el preset al 100%) contra la foto
+// original, como un fundido de opacidad de editor (ver lookIntensity.wgsl
+// y updateLookIntensity). PRESET_DEFAULTS solo se usa como valor de
+// respaldo para campos ausentes o corruptos al leer un JSON externo —
+// deben coincidir con los valores por defecto de los sliders en
+// index.html (mismo patrón que DEFAULT_EXPOSURE_STOPS más arriba).
 interface PresetValues {
   temperature: number;
   tint: number;
@@ -191,8 +195,9 @@ const paperTemperatureValueLabel = document.querySelector<HTMLSpanElement>("#pap
 const presetImportButton = document.querySelector<HTMLButtonElement>("#preset-import-button")!;
 const presetExportButton = document.querySelector<HTMLButtonElement>("#preset-export-button")!;
 const presetFileInput = document.querySelector<HTMLInputElement>("#preset-file-input")!;
-const presetIntensitySlider = document.querySelector<HTMLInputElement>("#preset-intensity-slider")!;
-const presetIntensityValueLabel = document.querySelector<HTMLSpanElement>("#preset-intensity-value")!;
+const filmSelect = document.querySelector<HTMLSelectElement>("#film-select")!;
+const lookIntensitySlider = document.querySelector<HTMLInputElement>("#look-intensity-slider")!;
+const lookIntensityValueLabel = document.querySelector<HTMLSpanElement>("#look-intensity-value")!;
 
 const renderButton = document.querySelector<HTMLButtonElement>("#render-button")!;
 const renderProgress = document.querySelector<HTMLDivElement>("#render-progress")!;
@@ -228,6 +233,7 @@ function computeSofteningRadiusPx(width: number): number {
 interface AppState {
   device: GPUDevice;
   context: GPUCanvasContext;
+  format: GPUTextureFormat;
   pipeline: Pipeline;
   lut: CurveLUT;
   sceneGradeParamsBuffer: GPUBuffer;
@@ -247,7 +253,10 @@ interface AppState {
   scannerPaperPass: Pass;
   scannerPaperUniformBuffer: GPUBuffer;
   paperOffsets: { r: number; g: number; b: number };
+  lookIntensityPass: Pass;
+  lookIntensityParamsBuffer: GPUBuffer;
   sourceTexture: GPUTexture | null;
+  encodedTexture: GPUTexture | null;
   imageWidth: number;
   imageHeight: number;
   renderWorker: Worker | null;
@@ -272,11 +281,6 @@ let dragStartPanY = 0;
 // Nombre base (sin extensión) de la última imagen cargada, para que el
 // preset exportado quede asociado por nombre a la imagen.
 let currentFileBaseName: string | null = null;
-
-// Preset actualmente importado (valores objetivo, sin mezclar con los
-// valores por defecto) — el slider de intensidad recalcula la mezcla
-// contra esto cada vez que cambia.
-let activePreset: PresetValues | null = null;
 
 function applyCanvasTransform(): void {
   const transform = `translate(${panX}px, ${panY}px) scale(${zoomPercent / 100})`;
@@ -605,9 +609,24 @@ async function ensureApp(): Promise<AppState> {
     { binding: 3, resource: { buffer: scannerPaperUniformBuffer } },
   ]);
 
+  // Paso final: mezcla el resultado revelado con la foto original según
+  // el slider "Intensidad del preset" (100% = look completo, 0% = foto
+  // sin tocar). Arranca en 1.0 (look completo) para no cambiar nada por
+  // defecto hasta que se importe un preset.
+  const lookIntensityParamsBuffer = device.createBuffer({
+    label: "look-intensity-params",
+    size: LOOK_INTENSITY_PARAMS_FLOATS * 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(lookIntensityParamsBuffer, 0, new Float32Array([1]));
+  const lookIntensityPass = new CompositePass(device, format, lookIntensityShader, "look-intensity", [
+    { binding: 4, resource: { buffer: lookIntensityParamsBuffer } },
+  ]);
+
   app = {
     device,
     context,
+    format,
     pipeline,
     lut,
     sceneGradeParamsBuffer,
@@ -627,7 +646,10 @@ async function ensureApp(): Promise<AppState> {
     scannerPaperPass,
     scannerPaperUniformBuffer,
     paperOffsets,
+    lookIntensityPass,
+    lookIntensityParamsBuffer,
     sourceTexture: null,
+    encodedTexture: null,
     imageWidth: 0,
     imageHeight: 0,
     renderWorker: null,
@@ -791,10 +813,22 @@ function isPaperEnabled(): boolean {
 }
 
 function renderCurrent(): void {
-  if (!app || !app.sourceTexture) return;
+  if (!app || !app.sourceTexture || !app.encodedTexture) return;
   app.pipeline.render(app.sourceTexture);
   const finalPass = isPaperEnabled() ? app.scannerPaperPass : app.previewEncodePass;
-  app.pipeline.displayFinal(finalPass, ["sharpened"], app.context);
+  // El resultado revelado se escribe primero a una textura intermedia (no
+  // directo al canvas) para poder mezclarlo con la foto original en el
+  // paso de "intensidad del preset" antes de mostrarlo.
+  app.pipeline.renderFinalToTexture(finalPass, ["sharpened"], app.encodedTexture);
+  app.pipeline.displayFinalWithTextures(
+    app.lookIntensityPass,
+    [app.sourceTexture, app.encodedTexture],
+    app.context
+  );
+}
+
+function updateLookIntensity(state: AppState, intensity: number): void {
+  state.device.queue.writeBuffer(state.lookIntensityParamsBuffer, 0, new Float32Array([intensity]));
 }
 
 /** Vuelve al preview rápido en tiempo real, descartando cualquier render riguroso previo. */
@@ -1000,33 +1034,6 @@ function collectCurrentPreset(): PresetValues {
   };
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-/** Mezcla un preset con los valores por defecto según la intensidad (0-100). `paper` no se mezcla: es una elección discreta. */
-function blendPreset(target: PresetValues, intensityPercent: number): PresetValues {
-  const t = intensityPercent / 100;
-  return {
-    temperature: lerp(PRESET_DEFAULTS.temperature, target.temperature, t),
-    tint: lerp(PRESET_DEFAULTS.tint, target.tint, t),
-    exposure: lerp(PRESET_DEFAULTS.exposure, target.exposure, t),
-    highlights: lerp(PRESET_DEFAULTS.highlights, target.highlights, t),
-    shadows: lerp(PRESET_DEFAULTS.shadows, target.shadows, t),
-    whites: lerp(PRESET_DEFAULTS.whites, target.whites, t),
-    blacks: lerp(PRESET_DEFAULTS.blacks, target.blacks, t),
-    halation: lerp(PRESET_DEFAULTS.halation, target.halation, t),
-    saturation: lerp(PRESET_DEFAULTS.saturation, target.saturation, t),
-    vibrance: lerp(PRESET_DEFAULTS.vibrance, target.vibrance, t),
-    grain: lerp(PRESET_DEFAULTS.grain, target.grain, t),
-    grainSize: lerp(PRESET_DEFAULTS.grainSize, target.grainSize, t),
-    acutance: lerp(PRESET_DEFAULTS.acutance, target.acutance, t),
-    softening: lerp(PRESET_DEFAULTS.softening, target.softening, t),
-    paper: target.paper,
-    paperTemperature: lerp(PRESET_DEFAULTS.paperTemperature, target.paperTemperature, t),
-  };
-}
-
 /** Escribe los valores en los sliders y en el motor, y renderiza una sola vez (evita un render por slider). */
 function applyPresetValues(values: PresetValues): void {
   temperatureSlider.value = String(values.temperature);
@@ -1119,11 +1126,13 @@ async function importPresetFile(file: File): Promise<void> {
   try {
     const text = await file.text();
     const parsed = parsePresetValues(JSON.parse(text));
-    activePreset = parsed;
-    presetIntensitySlider.disabled = false;
-    presetIntensitySlider.value = "100";
-    presetIntensityValueLabel.textContent = "100";
-    applyPresetValues(blendPreset(activePreset, 100));
+    applyPresetValues(parsed); // el preset se aplica entero; la intensidad se controla aparte, mezclando el resultado contra la foto original
+    lookIntensitySlider.value = "100";
+    lookIntensityValueLabel.textContent = "100";
+    if (app) {
+      updateLookIntensity(app, 1);
+      renderCurrent();
+    }
     setStatus("Preset importado.");
   } catch (err) {
     console.error(err);
@@ -1169,6 +1178,13 @@ async function handleFile(file: File): Promise<void> {
 
     state.sourceTexture?.destroy();
     state.sourceTexture = createTextureFromBitmap(state.device, bitmap, "rgba8unorm");
+    state.encodedTexture?.destroy();
+    state.encodedTexture = state.device.createTexture({
+      label: "encoded-final",
+      size: [bitmap.width, bitmap.height],
+      format: state.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
     state.imageWidth = bitmap.width;
     state.imageHeight = bitmap.height;
 
@@ -1213,10 +1229,21 @@ presetFileInput.addEventListener("change", () => {
   presetFileInput.value = ""; // permite volver a importar el mismo archivo dos veces seguidas
 });
 
-presetIntensitySlider.addEventListener("input", () => {
-  presetIntensityValueLabel.textContent = presetIntensitySlider.value;
-  if (!activePreset) return;
-  applyPresetValues(blendPreset(activePreset, parseFloat(presetIntensitySlider.value)));
+lookIntensitySlider.addEventListener("input", () => {
+  lookIntensityValueLabel.textContent = lookIntensitySlider.value;
+  if (!app) return;
+  updateLookIntensity(app, parseFloat(lookIntensitySlider.value) / 100);
+  backToPreview();
+  renderCurrent();
+});
+
+filmSelect.addEventListener("change", () => {
+  // Por ahora solo hay una película (Portra 400); el desplegable ya
+  // queda listo para más emulsiones sin tener que tocar el resto del
+  // flujo de eventos.
+  if (!app) return;
+  backToPreview();
+  renderCurrent();
 });
 
 // El arrastre funciona sobre todo el visor, tanto sin imagen cargada como

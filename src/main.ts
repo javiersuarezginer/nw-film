@@ -94,6 +94,53 @@ const PRINT_TEMPERATURE_STRENGTH = 0.15;
 // suave en vez de un mosaico de parches saturados.
 const RIGOROUS_SAMPLES_PER_PIXEL = 32;
 
+// --- Presets (look) ---
+// Un preset es una "receta" plana de todos los sliders físicos del look
+// (no incluye zoom/pan/comparación, que son estado de interfaz, ni el
+// render riguroso, que se dispara aparte). `paper` se aplica siempre al
+// 100% al importar (es una elección discreta de papel, no algo que tenga
+// sentido mezclar a medias); el resto de campos se interpolan entre estos
+// valores por defecto y los del preset según el slider de intensidad.
+// Deben coincidir con los valores por defecto de los sliders en index.html
+// (mismo patrón que DEFAULT_EXPOSURE_STOPS más arriba).
+interface PresetValues {
+  temperature: number;
+  tint: number;
+  exposure: number;
+  highlights: number;
+  shadows: number;
+  whites: number;
+  blacks: number;
+  halation: number;
+  saturation: number;
+  vibrance: number;
+  grain: number;
+  grainSize: number;
+  acutance: number;
+  softening: number;
+  paper: string;
+  paperTemperature: number;
+}
+
+const PRESET_DEFAULTS: PresetValues = {
+  temperature: 0,
+  tint: 0,
+  exposure: DEFAULT_EXPOSURE_STOPS,
+  highlights: 0,
+  shadows: 0,
+  whites: 0,
+  blacks: 0,
+  halation: 1,
+  saturation: 0,
+  vibrance: 0,
+  grain: 1,
+  grainSize: 1,
+  acutance: 1,
+  softening: 1,
+  paper: "endura",
+  paperTemperature: 0,
+};
+
 const openButton = document.querySelector<HTMLButtonElement>("#open-button")!;
 const exportButton = document.querySelector<HTMLButtonElement>("#export-button")!;
 const emptyState = document.querySelector<HTMLDivElement>("#empty-state")!;
@@ -140,6 +187,12 @@ const softeningValueLabel = document.querySelector<HTMLSpanElement>("#softening-
 const paperSelect = document.querySelector<HTMLSelectElement>("#paper-select")!;
 const paperTemperatureSlider = document.querySelector<HTMLInputElement>("#paper-temperature-slider")!;
 const paperTemperatureValueLabel = document.querySelector<HTMLSpanElement>("#paper-temperature-value")!;
+
+const presetImportButton = document.querySelector<HTMLButtonElement>("#preset-import-button")!;
+const presetExportButton = document.querySelector<HTMLButtonElement>("#preset-export-button")!;
+const presetFileInput = document.querySelector<HTMLInputElement>("#preset-file-input")!;
+const presetIntensitySlider = document.querySelector<HTMLInputElement>("#preset-intensity-slider")!;
+const presetIntensityValueLabel = document.querySelector<HTMLSpanElement>("#preset-intensity-value")!;
 
 const renderButton = document.querySelector<HTMLButtonElement>("#render-button")!;
 const renderProgress = document.querySelector<HTMLDivElement>("#render-progress")!;
@@ -215,6 +268,15 @@ let dragStartX = 0;
 let dragStartY = 0;
 let dragStartPanX = 0;
 let dragStartPanY = 0;
+
+// Nombre base (sin extensión) de la última imagen cargada, para que el
+// preset exportado quede asociado por nombre a la imagen.
+let currentFileBaseName: string | null = null;
+
+// Preset actualmente importado (valores objetivo, sin mezclar con los
+// valores por defecto) — el slider de intensidad recalcula la mezcla
+// contra esto cada vez que cambia.
+let activePreset: PresetValues | null = null;
 
 function applyCanvasTransform(): void {
   const transform = `translate(${panX}px, ${panY}px) scale(${zoomPercent / 100})`;
@@ -846,21 +908,227 @@ async function startRigorousRender(): Promise<void> {
   }
 }
 
-function downloadRenderedImage(): void {
+/**
+ * Guarda un blob en disco. Si el navegador soporta File System Access API
+ * (Chrome/Edge), abre el diálogo nativo "Guardar como" para que el usuario
+ * elija dónde guardarlo; si no (Firefox, Safari), cae al método de
+ * descarga automática de siempre a la carpeta de descargas.
+ */
+async function saveBlob(
+  blob: Blob,
+  suggestedName: string,
+  mimeType: string,
+  typeDescription: string
+): Promise<void> {
+  const picker = (
+    window as unknown as {
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        types: { description: string; accept: Record<string, string[]> }[];
+      }) => Promise<{
+        createWritable: () => Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }>;
+      }>;
+    }
+  ).showSaveFilePicker;
+
+  if (picker) {
+    try {
+      const extension = suggestedName.slice(suggestedName.lastIndexOf("."));
+      const handle = await picker({
+        suggestedName,
+        types: [{ description: typeDescription, accept: { [mimeType]: [extension] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return; // el usuario canceló el diálogo
+      console.error(err);
+      // sigue al método de descarga de siempre como respaldo
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.download = "revelado.png";
-  link.href = renderedCanvas.toDataURL("image/png");
+  link.download = suggestedName;
+  link.href = url;
   link.click();
+  URL.revokeObjectURL(url);
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("No se pudo generar el PNG."));
+    }, "image/png");
+  });
+}
+
+async function downloadRenderedImage(): Promise<void> {
+  const blob = await canvasToBlob(renderedCanvas);
+  await saveBlob(blob, "revelado.png", "image/png", "Imagen PNG");
 }
 
 /** Exporta lo que se ve ahora mismo: el render riguroso si ya está hecho, si no el preview en tiempo real. */
-function exportCurrentImage(): void {
+async function exportCurrentImage(): Promise<void> {
   if (!app || !app.sourceTexture) return;
   const canvas = app.mode === "rendered" ? renderedCanvas : processedCanvas;
-  const link = document.createElement("a");
-  link.download = "nw-film.png";
-  link.href = canvas.toDataURL("image/png");
-  link.click();
+  const blob = await canvasToBlob(canvas);
+  await saveBlob(blob, "nw-film.png", "image/png", "Imagen PNG");
+}
+
+function collectCurrentPreset(): PresetValues {
+  return {
+    temperature: parseFloat(temperatureSlider.value),
+    tint: parseFloat(tintSlider.value),
+    exposure: parseFloat(exposureSlider.value),
+    highlights: parseFloat(highlightsSlider.value),
+    shadows: parseFloat(shadowsSlider.value),
+    whites: parseFloat(whitesSlider.value),
+    blacks: parseFloat(blacksSlider.value),
+    halation: parseFloat(halationSlider.value),
+    saturation: parseFloat(saturationSlider.value),
+    vibrance: parseFloat(vibranceSlider.value),
+    grain: parseFloat(grainSlider.value),
+    grainSize: parseFloat(grainSizeSlider.value),
+    acutance: parseFloat(acutanceSlider.value),
+    softening: parseFloat(softeningSlider.value),
+    paper: paperSelect.value,
+    paperTemperature: parseFloat(paperTemperatureSlider.value),
+  };
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/** Mezcla un preset con los valores por defecto según la intensidad (0-100). `paper` no se mezcla: es una elección discreta. */
+function blendPreset(target: PresetValues, intensityPercent: number): PresetValues {
+  const t = intensityPercent / 100;
+  return {
+    temperature: lerp(PRESET_DEFAULTS.temperature, target.temperature, t),
+    tint: lerp(PRESET_DEFAULTS.tint, target.tint, t),
+    exposure: lerp(PRESET_DEFAULTS.exposure, target.exposure, t),
+    highlights: lerp(PRESET_DEFAULTS.highlights, target.highlights, t),
+    shadows: lerp(PRESET_DEFAULTS.shadows, target.shadows, t),
+    whites: lerp(PRESET_DEFAULTS.whites, target.whites, t),
+    blacks: lerp(PRESET_DEFAULTS.blacks, target.blacks, t),
+    halation: lerp(PRESET_DEFAULTS.halation, target.halation, t),
+    saturation: lerp(PRESET_DEFAULTS.saturation, target.saturation, t),
+    vibrance: lerp(PRESET_DEFAULTS.vibrance, target.vibrance, t),
+    grain: lerp(PRESET_DEFAULTS.grain, target.grain, t),
+    grainSize: lerp(PRESET_DEFAULTS.grainSize, target.grainSize, t),
+    acutance: lerp(PRESET_DEFAULTS.acutance, target.acutance, t),
+    softening: lerp(PRESET_DEFAULTS.softening, target.softening, t),
+    paper: target.paper,
+    paperTemperature: lerp(PRESET_DEFAULTS.paperTemperature, target.paperTemperature, t),
+  };
+}
+
+/** Escribe los valores en los sliders y en el motor, y renderiza una sola vez (evita un render por slider). */
+function applyPresetValues(values: PresetValues): void {
+  temperatureSlider.value = String(values.temperature);
+  temperatureValueLabel.textContent = temperatureSlider.value;
+  tintSlider.value = String(values.tint);
+  tintValueLabel.textContent = tintSlider.value;
+  exposureSlider.value = values.exposure.toFixed(1);
+  exposureValueLabel.textContent = values.exposure.toFixed(1);
+  highlightsSlider.value = String(values.highlights);
+  highlightsValueLabel.textContent = highlightsSlider.value;
+  shadowsSlider.value = String(values.shadows);
+  shadowsValueLabel.textContent = shadowsSlider.value;
+  whitesSlider.value = String(values.whites);
+  whitesValueLabel.textContent = whitesSlider.value;
+  blacksSlider.value = String(values.blacks);
+  blacksValueLabel.textContent = blacksSlider.value;
+  halationSlider.value = values.halation.toFixed(2);
+  halationValueLabel.textContent = values.halation.toFixed(2);
+  saturationSlider.value = String(values.saturation);
+  saturationValueLabel.textContent = saturationSlider.value;
+  vibranceSlider.value = String(values.vibrance);
+  vibranceValueLabel.textContent = vibranceSlider.value;
+  grainSlider.value = values.grain.toFixed(2);
+  grainValueLabel.textContent = values.grain.toFixed(2);
+  grainSizeSlider.value = values.grainSize.toFixed(2);
+  grainSizeValueLabel.textContent = values.grainSize.toFixed(2);
+  acutanceSlider.value = values.acutance.toFixed(2);
+  acutanceValueLabel.textContent = values.acutance.toFixed(2);
+  softeningSlider.value = values.softening.toFixed(2);
+  softeningValueLabel.textContent = values.softening.toFixed(2);
+  paperSelect.value = values.paper;
+  paperTemperatureSlider.value = String(values.paperTemperature);
+  paperTemperatureValueLabel.textContent = paperTemperatureSlider.value;
+  paperTemperatureSlider.disabled = !isPaperEnabled();
+
+  if (!app) return;
+  updateSceneGrade(app);
+  app.device.queue.writeBuffer(
+    app.exposureUniformBuffer,
+    5 * 4,
+    new Float32Array([parseFloat(exposureSlider.value)])
+  );
+  updateHalationIntensity(app, parseFloat(halationSlider.value));
+  updateSaturationVibrance(app, parseFloat(saturationSlider.value) / 100, parseFloat(vibranceSlider.value) / 100);
+  updateGrainIntensity(app, parseFloat(grainSlider.value));
+  if (app.imageWidth) updateGrainSize(app, app.imageWidth, parseFloat(grainSizeSlider.value));
+  updateAcutanceAmount(app, parseFloat(acutanceSlider.value));
+  updateSofteningAmount(app, parseFloat(softeningSlider.value));
+  updatePrintTemperature(app, parseFloat(paperTemperatureSlider.value) / 100);
+  backToPreview();
+  renderCurrent();
+}
+
+function coercePresetNumber(raw: unknown, fallback: number): number {
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
+}
+
+/** Reconstruye un PresetValues válido a partir de JSON externo, sustituyendo por defecto cualquier campo ausente o corrupto. */
+function parsePresetValues(raw: unknown): PresetValues {
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    temperature: coercePresetNumber(obj.temperature, PRESET_DEFAULTS.temperature),
+    tint: coercePresetNumber(obj.tint, PRESET_DEFAULTS.tint),
+    exposure: coercePresetNumber(obj.exposure, PRESET_DEFAULTS.exposure),
+    highlights: coercePresetNumber(obj.highlights, PRESET_DEFAULTS.highlights),
+    shadows: coercePresetNumber(obj.shadows, PRESET_DEFAULTS.shadows),
+    whites: coercePresetNumber(obj.whites, PRESET_DEFAULTS.whites),
+    blacks: coercePresetNumber(obj.blacks, PRESET_DEFAULTS.blacks),
+    halation: coercePresetNumber(obj.halation, PRESET_DEFAULTS.halation),
+    saturation: coercePresetNumber(obj.saturation, PRESET_DEFAULTS.saturation),
+    vibrance: coercePresetNumber(obj.vibrance, PRESET_DEFAULTS.vibrance),
+    grain: coercePresetNumber(obj.grain, PRESET_DEFAULTS.grain),
+    grainSize: coercePresetNumber(obj.grainSize, PRESET_DEFAULTS.grainSize),
+    acutance: coercePresetNumber(obj.acutance, PRESET_DEFAULTS.acutance),
+    softening: coercePresetNumber(obj.softening, PRESET_DEFAULTS.softening),
+    paper: obj.paper === "none" ? "none" : PRESET_DEFAULTS.paper,
+    paperTemperature: coercePresetNumber(obj.paperTemperature, PRESET_DEFAULTS.paperTemperature),
+  };
+}
+
+async function exportPreset(): Promise<void> {
+  const preset = collectCurrentPreset();
+  const json = JSON.stringify(preset, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const suggestedName = `${currentFileBaseName ?? "nw-film-preset"}.json`;
+  await saveBlob(blob, suggestedName, "application/json", "Preset JSON");
+}
+
+async function importPresetFile(file: File): Promise<void> {
+  try {
+    const text = await file.text();
+    const parsed = parsePresetValues(JSON.parse(text));
+    activePreset = parsed;
+    presetIntensitySlider.disabled = false;
+    presetIntensitySlider.value = "100";
+    presetIntensityValueLabel.textContent = "100";
+    applyPresetValues(blendPreset(activePreset, 100));
+    setStatus("Preset importado.");
+  } catch (err) {
+    console.error(err);
+    setStatus("No se pudo leer el preset (JSON inválido).");
+  }
 }
 
 async function handleFile(file: File): Promise<void> {
@@ -870,6 +1138,7 @@ async function handleFile(file: File): Promise<void> {
   }
 
   setStatus("Cargando imagen...");
+  currentFileBaseName = file.name.replace(/\.[^./\\]+$/, "");
 
   try {
     const bitmap = await createImageBitmap(file);
@@ -917,12 +1186,37 @@ async function handleFile(file: File): Promise<void> {
 
 openButton.addEventListener("click", () => fileInput.click());
 emptyState.addEventListener("click", () => fileInput.click());
-exportButton.addEventListener("click", () => exportCurrentImage());
+exportButton.addEventListener("click", () => {
+  exportCurrentImage().catch((err) => {
+    console.error(err);
+    setStatus(err instanceof Error ? err.message : "Error al exportar la imagen.");
+  });
+});
 
 fileInput.addEventListener("change", () => {
   const file = fileInput.files?.[0];
   if (file) handleFile(file);
   fileInput.value = ""; // permite volver a elegir el mismo archivo dos veces seguidas
+});
+
+presetImportButton.addEventListener("click", () => presetFileInput.click());
+presetExportButton.addEventListener("click", () => {
+  exportPreset().catch((err) => {
+    console.error(err);
+    setStatus(err instanceof Error ? err.message : "Error al exportar el preset.");
+  });
+});
+
+presetFileInput.addEventListener("change", () => {
+  const file = presetFileInput.files?.[0];
+  if (file) importPresetFile(file);
+  presetFileInput.value = ""; // permite volver a importar el mismo archivo dos veces seguidas
+});
+
+presetIntensitySlider.addEventListener("input", () => {
+  presetIntensityValueLabel.textContent = presetIntensitySlider.value;
+  if (!activePreset) return;
+  applyPresetValues(blendPreset(activePreset, parseFloat(presetIntensitySlider.value)));
 });
 
 // El arrastre funciona sobre todo el visor, tanto sin imagen cargada como
@@ -1047,7 +1341,10 @@ renderButton.addEventListener("click", () => {
 });
 
 downloadButton.addEventListener("click", () => {
-  downloadRenderedImage();
+  downloadRenderedImage().catch((err) => {
+    console.error(err);
+    setStatus(err instanceof Error ? err.message : "Error al descargar el render.");
+  });
 });
 
 zoomSlider.addEventListener("input", () => {

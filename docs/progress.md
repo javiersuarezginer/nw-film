@@ -1,5 +1,19 @@
 # Progress log
 
+## 2026-08-02 (toolbar, grano mínimo, presets JSON, diálogo de guardado, intensidad de preset)
+- Confirmado al inicio de sesión que el deploy en Vercel del commit `c3a9ee0` funcionó (sitio en producción sirve el build actualizado con "Comparar"/"Ver original").
+- Toolbar: botones agrupados a la izquierda con 10px de gap (`#toolbar-actions`), en vez de repartidos por todo el ancho con `space-between`. "Lado a lado" renombrado a "Comparar".
+- Grano: mínimo del slider "Tamaño de grano" bajado de 0.3× a 0.05× (step 0.05) — a resolución real el mínimo anterior seguía dando grano visiblemente grueso.
+- Nueva sección "Preset" en la sidebar: exportar/importar el look completo como JSON. El archivo exportado toma el nombre exacto de la imagen cargada, para quedar asociado. Importar aplica todos los sliders + el motor en una sola pasada de render.
+- Exportar imagen y exportar preset usan `showSaveFilePicker` cuando el navegador lo soporta (diálogo nativo "Guardar como"); si no, cae a la descarga automática de siempre.
+- Slider de "Intensidad del preset" (0-100%, deshabilitado sin preset importado): interpola cada parámetro numérico entre su valor por defecto y el del preset. El papel (`paper-select`) se aplica entero al importar, sin mezclar — decisión de diseño documentada en `STATUS.md`, pendiente de confirmar con el usuario si prefiere que también revierta a 0%.
+- Verificado en el navegador con `docs/reference/portra400-grain-reference.jpg`: grano más fino en el mínimo, export/import de preset con nombre y contenido correctos, mezcla de intensidad correcta en 0/50/100%. Durante la verificación se encontró un bug real (las etiquetas de valor con dos decimales perdían el formato al releer `slider.value` tras normalizarlo el navegador) y se arregló antes de dar la tarea por terminada. `tsc --noEmit`, `vitest run` (23/23) y `vite build` sin errores.
+
+## 2026-07-29 (cierre de sesión — commit y push a producción)
+- Con los cuatro bloques de feedback completos (afinar el look, controles nuevos, flujo de trabajo), se hizo commit de toda la sesión (`c3a9ee0`, "Responder al feedback de la primera foto real: look, controles y flujo de trabajo") y `git push` a `origin/main`. Confirmado antes de commitear: `tsc --noEmit`, `vitest run` (23/23) y `vite build` de producción, los tres sin errores.
+- Si Vercel sigue conectado al repo desde la sesión anterior, el push debería haber disparado un despliegue automático a producción — no verificable desde este entorno, pendiente de que el usuario lo confirme.
+- Sesión cerrada a petición del usuario. Próxima sesión: confirmar el despliegue, y luego decidir entre el banding a 16 bits o el renderizador de grano riguroso como siguiente foco.
+
 ## 2026-07-29 (continuación — Quitar leyenda técnica del estado)
 - Tras cargar una imagen ya no se muestra el texto "Imagen WxH. Halation + curva Portra 400 + grano + papel Endura aplicados." en la cabecera — quedaba de las primeras fases del proyecto (para depurar visualmente) y no aportaba nada a un usuario editando. Los demás mensajes de estado (cargando, errores, progreso del render riguroso) se mantienen.
 - Verificado en el navegador: cabecera limpia tras cargar. Sin errores de consola nuevos, 23 tests siguen pasando.

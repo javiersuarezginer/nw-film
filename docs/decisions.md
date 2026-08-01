@@ -1,5 +1,18 @@
 # Decisiones
 
+## [2026-08-02] Intensidad del preset: el papel se aplica entero, no se mezcla
+**Decisión:** El slider "Intensidad del preset" (0-100%) interpola linealmente cada parámetro numérico del look entre su valor por defecto (`PRESET_DEFAULTS`) y el valor objetivo del preset importado. El campo `paper` (desplegable Endura/Ninguno) es la excepción: se aplica al 100% en el momento de importar el preset y no cambia al mover el slider de intensidad después. A intensidad 0%, todos los sliders numéricos vuelven exactamente a sus valores por defecto, pero el papel elegido por el preset se mantiene.
+**Por qué:** `paper` es una elección discreta (dos opciones), no un valor continuo — no hay una "mezcla al 50%" con sentido físico entre "papel Endura" y "sin papel". Interpolar solo tiene sentido para los sliders numéricos.
+**Efecto secundario a vigilar:** esto rompe la intuición de que "intensidad 0% = como si no hubiera preset" para el papel específicamente. Un usuario podría esperar que bajar la intensidad a 0 revierta también el papel. No se ha confirmado con el usuario si este es el comportamiento deseado.
+**Verificado:** importado un preset de prueba con `paper: "endura"`, confirmado que a intensidad 0% los sliders numéricos vuelven a sus valores por defecto (temperatura 0, exposición -0.7, etc.) pero el desplegable de papel se mantiene en el valor del preset. `tsc --noEmit`, `vitest run` (23/23) y `vite build` sin errores.
+**Revisitar si:** el usuario pide explícitamente que el papel también revierta a intensidad 0%, o que se excluya el papel del JSON de preset por completo.
+
+## [2026-08-02] Diálogo de guardado nativo con fallback silencioso a descarga automática
+**Decisión:** Exportar imagen y exportar preset intentan primero `window.showSaveFilePicker` (File System Access API) para que el usuario elija dónde guardar el archivo. Si el navegador no lo soporta (Firefox, Safari) o el usuario cancela el diálogo, cae automáticamente al método de descarga de siempre (`<a download>` + blob URL) sin mostrar error. Solo se loguea a consola si falla por una razón distinta a "usuario canceló".
+**Por qué:** Es la única forma en la web de dejar elegir carpeta de destino sin backend propio; el fallback evita que la función deje de funcionar en navegadores sin soporte (cobertura total de navegadores era un requisito implícito, no roto por añadir esta mejora).
+**Verificado:** en este entorno de pruebas los clics disparados por script no cuentan como "gesto de usuario" para el navegador, así que `showSaveFilePicker` lanza `SecurityError` de forma consistente y se confirmó que el fallback a descarga automática se activa correctamente y produce el archivo esperado (nombre y contenido correctos). No se ha podido verificar el diálogo nativo con un clic real de usuario en este entorno — pendiente de que el usuario lo confirme en su navegador.
+**Revisitar si:** el usuario reporta que el diálogo nativo no aparece en Chrome/Edge con un clic real (indicaría un bug distinto al comportamiento esperado en pruebas automatizadas).
+
 ## [2026-07-29] Leyenda técnica del estado eliminada tras cargar la imagen
 **Decisión:** Tras procesar una imagen con éxito, `setStatus("")` limpia el mensaje de estado en vez de mostrar `Imagen WxH. Halation + curva Portra 400 + grano + papel Endura aplicados.`. Los demás mensajes de estado (mientras carga, error, mientras corre el render riguroso) se dejan intactos — son información transitoria útil, no una leyenda técnica permanente.
 **Por qué:** El usuario lo pidió explícitamente: es una leyenda de depuración de las primeras fases del proyecto (para confirmar visualmente qué se estaba aplicando) que ya no aporta nada a alguien usando la app para editar.

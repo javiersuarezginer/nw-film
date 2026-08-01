@@ -18,10 +18,12 @@
         <div id="editor-body">
           <div id="viewport">
             <div id="toolbar">
-              <button id="open-button" type="button">Abrir imagen</button>
-              <button id="export-button" type="button">Exportar</button>
-              <button id="ab-toggle" type="button">Ver original</button>
-              <button id="side-by-side-toggle" type="button">Lado a lado</button>
+              <div id="toolbar-actions">
+                <button id="open-button" type="button">Abrir imagen</button>
+                <button id="export-button" type="button">Exportar</button>
+                <button id="ab-toggle" type="button">Ver original</button>
+                <button id="side-by-side-toggle" type="button">Comparar</button>
+              </div>
               <div id="zoom-controls">
                 <label for="zoom-slider">Zoom <span id="zoom-value">100</span>%</label>
                 <input id="zoom-slider" type="range" min="10" max="500" step="1" value="100" />
@@ -50,6 +52,22 @@
           </div>
 
           <aside id="sidebar">
+            <section class="control-section">
+              <h3>Preset</h3>
+              <div id="preset-buttons">
+                <button id="preset-import-button" type="button" class="panel-btn">Importar preset</button>
+                <button id="preset-export-button" type="button" class="panel-btn">Exportar preset</button>
+              </div>
+              <input id="preset-file-input" type="file" accept="application/json,.json" hidden />
+
+              <div class="slider-header">
+                <label for="preset-intensity-slider">
+                  Intensidad del preset: <span id="preset-intensity-value">100</span>%
+                </label>
+              </div>
+              <input id="preset-intensity-slider" type="range" min="0" max="100" step="1" value="100" disabled />
+            </section>
+
             <section class="control-section">
               <h3>Balance de blanco</h3>
               <div class="slider-header">
@@ -155,7 +173,7 @@
                 </label>
                 <button type="button" class="reset-btn" data-reset="grain-size-slider" data-default="1" title="Restablecer">↺</button>
               </div>
-              <input id="grain-size-slider" type="range" min="0.3" max="3" step="0.1" value="1" />
+              <input id="grain-size-slider" type="range" min="0.05" max="3" step="0.05" value="1" />
 
               <div class="slider-header">
                 <label for="acutance-slider">

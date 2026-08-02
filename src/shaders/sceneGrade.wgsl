@@ -41,6 +41,14 @@ struct SceneGradeParams {
   whites: f32,      // -1..1
   blacks: f32,      // -1..1
   reserved: f32,
+  // Carácter de color propio de la película activa (ver
+  // FilmColorCharacter en color-science/films/registry.ts) — mismo
+  // significado que temperature/tint pero repartido por zona tonal, y
+  // se SUMA al ajuste manual del usuario en vez de sustituirlo.
+  filmShadowWarmth: f32,
+  filmShadowTint: f32,
+  filmHighlightWarmth: f32,
+  filmHighlightTint: f32,
 };
 
 @group(0) @binding(0) var inputTexture: texture_2d<f32>;
@@ -95,5 +103,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let outG = mg * exp2(applyZones(stopsG));
   let outB = mg * exp2(applyZones(stopsB));
 
-  return vec4<f32>(outR, outG, outB, scene.a);
+  // Carácter de color de la película: mismo par cálido/frío + verde/magenta
+  // que el balance de blanco manual, pero pesado por zona tonal (a partir
+  // de la luminancia de la escena SIN gradar, para que no dependa de lo
+  // que el usuario ya haya movido) — así cada película tiñe sus sombras y
+  // luces de forma distinta, no solo la imagen entera por igual.
+  let luma = dot(scene.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+  let lumaStops = log2(max(luma, eps) / mg);
+  let shadowW = 1.0 - smoothstep(-BROAD_ZONE_STOPS, BROAD_ZONE_STOPS, lumaStops);
+  let highlightW = smoothstep(-BROAD_ZONE_STOPS, BROAD_ZONE_STOPS, lumaStops);
+
+  let filmWarmth = params.filmShadowWarmth * shadowW + params.filmHighlightWarmth * highlightW;
+  let filmTint = params.filmShadowTint * shadowW + params.filmHighlightTint * highlightW;
+  let filmGain = vec3<f32>(
+    1.0 + filmWarmth * TEMP_STRENGTH,
+    1.0 - filmTint * TINT_STRENGTH,
+    1.0 - filmWarmth * TEMP_STRENGTH
+  );
+
+  return vec4<f32>(vec3<f32>(outR, outG, outB) * filmGain, scene.a);
 }

@@ -1,16 +1,19 @@
-// Pass — Curva característica H&D de Portra 400, por canal.
+// Pass — Curva característica H&D de la película activa, por canal.
 //
 // Convierte la luz de la escena (lineal) en densidad de cada capa de
-// emulsión, usando la curva real digitalizada del datasheet de Kodak
-// (E-4050). El control de exposición desplaza el log-exposure antes de
-// consultar la curva, tal y como sub/sobreexponer desplaza el punto de
-// trabajo sobre la curva característica real.
+// emulsión, usando la curva real digitalizada del datasheet del
+// fabricante (Kodak o Fujifilm — ver color-science/films/registry.ts). La
+// LUT (`curveLUT`) se recarga al cambiar de película en el desplegable;
+// este shader no sabe ni le importa cuál está activa. El control de
+// exposición desplaza el log-exposure antes de consultar la curva, tal y
+// como sub/sobreexponer desplaza el punto de trabajo sobre la curva
+// característica real.
 //
 // Este pass SOLO produce densidad — no la convierte todavía en imagen
 // visible. Eso es a propósito: el grano (pass siguiente) necesita la
 // densidad real para saber cuánto grano mostrar en cada zona, y tiene
 // que perturbarla ANTES de que se convierta en una vista previa. La
-// conversión a imagen visible pasa a `previewEncode.wgsl`.
+// conversión a imagen visible pasa a `scannerPaper.wgsl`.
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,

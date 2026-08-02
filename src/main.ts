@@ -14,14 +14,11 @@ import characteristicCurveShader from "./shaders/characteristicCurve.wgsl?raw";
 import grainShader from "./shaders/grain.wgsl?raw";
 import acutanceShader from "./shaders/acutance.wgsl?raw";
 import opticalSofteningShader from "./shaders/opticalSoftening.wgsl?raw";
-import previewEncodeShader from "./shaders/previewEncode.wgsl?raw";
 import scannerPaperShader from "./shaders/scannerPaper.wgsl?raw";
 import lookIntensityShader from "./shaders/lookIntensity.wgsl?raw";
 import type { CurveLUT } from "./color-science/curveModel";
 import { FILMS, DEFAULT_FILM_ID, getFilm, type FilmProfile } from "./color-science/films/registry";
 import { buildPaperLUT, PAPER_DENSITY_MIN, PAPER_DENSITY_MAX } from "./color-science/portraEndura/paperCurve";
-import type { RigorousRenderParams } from "./render/rigorousRender";
-import type { WorkerResponse } from "./render/rigorousRender.worker";
 
 const MIDDLE_GRAY = 0.18;
 // Exposición por defecto: las imágenes de entrada llegan display-referred
@@ -38,13 +35,12 @@ const MIDDLE_GRAY = 0.18;
 const DEFAULT_EXPOSURE_STOPS = -0.7;
 const CURVE_PARAMS_FLOATS = 12; // debe coincidir con el struct CurveParams del shader
 const BLUR_PARAMS_FLOATS = 8; // debe coincidir con el struct BlurParams del shader
-const PREVIEW_PARAMS_FLOATS = 8; // debe coincidir con el struct PreviewParams del shader
 const GRAIN_PARAMS_FLOATS = 12; // debe coincidir con el struct GrainParams del shader
 const SCANNER_PAPER_PARAMS_FLOATS = 12; // debe coincidir con el struct ScannerPaperParams del shader
 const ACUTANCE_PARAMS_FLOATS = 4; // debe coincidir con el struct AcutanceParams del shader
 const HALATION_PARAMS_FLOATS = 4; // debe coincidir con el struct HalationParams del shader
 const SOFTENING_PARAMS_FLOATS = 4; // debe coincidir con el struct SofteningParams del shader
-const SCENE_GRADE_PARAMS_FLOATS = 8; // debe coincidir con el struct SceneGradeParams del shader
+const SCENE_GRADE_PARAMS_FLOATS = 12; // debe coincidir con el struct SceneGradeParams del shader
 const LOOK_INTENSITY_PARAMS_FLOATS = 4; // debe coincidir con el struct LookIntensityParams del shader
 
 const ZOOM_MIN_PERCENT = 10;
@@ -90,13 +86,6 @@ const SOFTENING_BASE_AMOUNT = 0.35; // mezcla máxima con la versión difuminada
 // ampliadora encima de la calibración automática), no dato de datasheet.
 const PRINT_TEMPERATURE_STRENGTH = 0.15;
 
-// Muestras Monte Carlo por píxel del render riguroso — compromiso entre
-// ruido de muestreo y tiempo de cálculo en un solo Web Worker. Con pocas
-// muestras el resultado se ve "a bloques" (solo hay N+1 niveles de gris
-// posibles); hacen falta bastantes para que la textura de grano sea
-// suave en vez de un mosaico de parches saturados.
-const RIGOROUS_SAMPLES_PER_PIXEL = 32;
-
 // --- Presets (look) ---
 // Un preset es una "receta" plana de todos los sliders físicos del look
 // (no incluye zoom/pan/comparación, que son estado de interfaz, ni el
@@ -123,7 +112,6 @@ interface PresetValues {
   grainSize: number;
   acutance: number;
   softening: number;
-  paper: string;
   paperTemperature: number;
 }
 
@@ -142,7 +130,6 @@ const PRESET_DEFAULTS: PresetValues = {
   grainSize: 1,
   acutance: 1,
   softening: 1,
-  paper: "endura",
   paperTemperature: 0,
 };
 
@@ -153,13 +140,17 @@ const fileInput = document.querySelector<HTMLInputElement>("#file-input")!;
 const statusEl = document.querySelector<HTMLSpanElement>("#status")!;
 const originalCanvas = document.querySelector<HTMLCanvasElement>("#canvas-original")!;
 const processedCanvas = document.querySelector<HTMLCanvasElement>("#canvas-processed")!;
-const renderedCanvas = document.querySelector<HTMLCanvasElement>("#canvas-rendered")!;
 const canvasStacks = document.querySelectorAll<HTMLDivElement>(".canvas-stack");
 const canvasPanes = document.querySelector<HTMLDivElement>("#canvas-panes")!;
 const paneOriginal = document.querySelector<HTMLDivElement>("#pane-original")!;
 const paneProcessed = document.querySelector<HTMLDivElement>("#pane-processed")!;
 const viewportFrame = document.querySelector<HTMLDivElement>("#viewport-frame")!;
 const sideBySideToggleButton = document.querySelector<HTMLButtonElement>("#side-by-side-toggle")!;
+const filmGridToggleButton = document.querySelector<HTMLButtonElement>("#film-grid-toggle")!;
+const filmGridOverlay = document.querySelector<HTMLDivElement>("#film-grid-overlay")!;
+const filmGridClose = document.querySelector<HTMLButtonElement>("#film-grid-close")!;
+const filmGridStatus = document.querySelector<HTMLDivElement>("#film-grid-status")!;
+const filmGrid = document.querySelector<HTMLDivElement>("#film-grid")!;
 
 const temperatureSlider = document.querySelector<HTMLInputElement>("#temperature-slider")!;
 const temperatureValueLabel = document.querySelector<HTMLSpanElement>("#temperature-value")!;
@@ -189,7 +180,6 @@ const acutanceSlider = document.querySelector<HTMLInputElement>("#acutance-slide
 const acutanceValueLabel = document.querySelector<HTMLSpanElement>("#acutance-value")!;
 const softeningSlider = document.querySelector<HTMLInputElement>("#softening-slider")!;
 const softeningValueLabel = document.querySelector<HTMLSpanElement>("#softening-value")!;
-const paperSelect = document.querySelector<HTMLSelectElement>("#paper-select")!;
 const paperTemperatureSlider = document.querySelector<HTMLInputElement>("#paper-temperature-slider")!;
 const paperTemperatureValueLabel = document.querySelector<HTMLSpanElement>("#paper-temperature-value")!;
 
@@ -207,12 +197,6 @@ for (const film of FILMS) {
   if (film.id === DEFAULT_FILM_ID) option.selected = true;
   filmSelect.appendChild(option);
 }
-
-const renderButton = document.querySelector<HTMLButtonElement>("#render-button")!;
-const renderProgress = document.querySelector<HTMLDivElement>("#render-progress")!;
-const renderProgressFill = document.querySelector<HTMLDivElement>("#render-progress-fill")!;
-const renderProgressText = document.querySelector<HTMLSpanElement>("#render-progress-text")!;
-const downloadButton = document.querySelector<HTMLButtonElement>("#download-button")!;
 
 const abToggleButton = document.querySelector<HTMLButtonElement>("#ab-toggle")!;
 const zoomSlider = document.querySelector<HTMLInputElement>("#zoom-slider")!;
@@ -274,8 +258,6 @@ interface AppState {
   softeningBlurHBuffer: GPUBuffer;
   softeningBlurVBuffer: GPUBuffer;
   softeningParamsBuffer: GPUBuffer;
-  previewEncodePass: Pass;
-  previewUniformBuffer: GPUBuffer;
   scannerPaperPass: Pass;
   scannerPaperUniformBuffer: GPUBuffer;
   paperOffsets: { r: number; g: number; b: number };
@@ -285,9 +267,6 @@ interface AppState {
   encodedTexture: GPUTexture | null;
   imageWidth: number;
   imageHeight: number;
-  renderWorker: Worker | null;
-  renderGeneration: number;
-  mode: "preview" | "rendering" | "rendered";
 }
 
 let app: AppState | null = null;
@@ -334,10 +313,6 @@ function fitToViewport(): void {
 }
 
 function updateVisibleLayer(): void {
-  const showRendered = app?.mode === "rendered";
-  renderedCanvas.hidden = !showRendered;
-  processedCanvas.hidden = showRendered;
-
   if (sideBySide) {
     paneOriginal.hidden = false;
     paneProcessed.hidden = false;
@@ -389,8 +364,13 @@ async function ensureApp(): Promise<AppState> {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   // middleGray no cambia; el resto (temperatura, matiz, luces, sombras,
-  // blancos, negros) arrancan a 0 y se actualizan con los sliders.
-  device.queue.writeBuffer(sceneGradeParamsBuffer, 0, new Float32Array([MIDDLE_GRAY, 0, 0, 0, 0, 0, 0, 0]));
+  // blancos, negros, carácter de color de la película) arranca a 0 y se
+  // actualiza con updateSceneGrade en cuanto se carga una imagen.
+  device.queue.writeBuffer(
+    sceneGradeParamsBuffer,
+    0,
+    new Float32Array([MIDDLE_GRAY, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+  );
 
   const blurHBuffer = device.createBuffer({
     label: "blur-h-params",
@@ -402,15 +382,6 @@ async function ensureApp(): Promise<AppState> {
     size: BLUR_PARAMS_FLOATS * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-
-  const previewParams = new Float32Array(PREVIEW_PARAMS_FLOATS);
-  previewParams.set([lut.dMin.r, lut.dMin.g, lut.dMin.b, lut.dMax.r, lut.dMax.g, lut.dMax.b, 0, 0]);
-  const previewUniformBuffer = device.createBuffer({
-    label: "preview-params",
-    size: previewParams.byteLength,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(previewUniformBuffer, 0, previewParams);
 
   const grainUniformBuffer = device.createBuffer({
     label: "grain-params",
@@ -612,12 +583,9 @@ async function ensureApp(): Promise<AppState> {
     "sharpened"
   );
 
-  // Las dos etapas finales (papel real vs. preview plana) NO se añaden a
-  // la cadena fija — se ejecutan sueltas con `pipeline.displayFinal`,
-  // para poder conmutar entre ellas sin recalcular todo lo anterior.
-  const previewEncodePass = new FullscreenPass(device, format, previewEncodeShader, "preview-encode", [
-    { binding: 2, resource: { buffer: previewUniformBuffer } },
-  ]);
+  // Etapa final de papel (Kodak Portra Endura) — NO se añade a la cadena
+  // fija, se ejecuta suelta con `pipeline.renderFinalToTexture` para
+  // poder mezclarla luego con la foto original en el paso de intensidad.
   const scannerPaperPass = new FullscreenPass(device, format, scannerPaperShader, "scanner-paper", [
     { binding: 2, resource: paperLutTexture.createView() },
     { binding: 3, resource: { buffer: scannerPaperUniformBuffer } },
@@ -657,8 +625,6 @@ async function ensureApp(): Promise<AppState> {
     softeningBlurHBuffer,
     softeningBlurVBuffer,
     softeningParamsBuffer,
-    previewEncodePass,
-    previewUniformBuffer,
     scannerPaperPass,
     scannerPaperUniformBuffer,
     paperOffsets,
@@ -668,9 +634,6 @@ async function ensureApp(): Promise<AppState> {
     encodedTexture: null,
     imageWidth: 0,
     imageHeight: 0,
-    renderWorker: null,
-    renderGeneration: 0,
-    mode: "preview",
   };
   return app;
 }
@@ -688,6 +651,14 @@ function updateSceneGrade(state: AppState): void {
     state.sceneGradeParamsBuffer,
     1 * 4,
     new Float32Array([temperature, tint, highlights, shadows, whites, blacks])
+  );
+
+  // offset 32 bytes = índices 8-11 (carácter de color de la película activa).
+  const cc = state.currentFilm.colorCharacter;
+  state.device.queue.writeBuffer(
+    state.sceneGradeParamsBuffer,
+    8 * 4,
+    new Float32Array([cc.shadowWarmth / 100, cc.shadowTint / 100, cc.highlightWarmth / 100, cc.highlightTint / 100])
   );
 }
 
@@ -779,20 +750,16 @@ function updateSofteningAmount(state: AppState, multiplier: number): void {
   );
 }
 
-// Escribe en las DOS etapas finales (papel real y vista previa plana) a
-// la vez, para que el resultado no cambie al alternar el checkbox de
-// papel.
-function updateSaturationVibrance(state: AppState, saturation: number, vibrance: number): void {
+// La saturación/viveza final es la del slider del usuario MÁS el sesgo
+// propio de la película activa (ver FilmColorCharacter) — no lo sustituye.
+function updateSaturationVibrance(state: AppState): void {
+  const cc = state.currentFilm.colorCharacter;
+  const saturation = parseFloat(saturationSlider.value) / 100 + cc.saturationBias / 100;
+  const vibrance = parseFloat(vibranceSlider.value) / 100 + cc.vibranceBias / 100;
   // offset 32 bytes = índice 8 (saturation) en ScannerPaperParams; sigue vibrance.
   state.device.queue.writeBuffer(
     state.scannerPaperUniformBuffer,
     8 * 4,
-    new Float32Array([saturation, vibrance])
-  );
-  // offset 24 bytes = índice 6 (saturation) en PreviewParams; sigue vibrance.
-  state.device.queue.writeBuffer(
-    state.previewUniformBuffer,
-    6 * 4,
     new Float32Array([saturation, vibrance])
   );
 }
@@ -859,29 +826,27 @@ function loadFilmIntoState(state: AppState, film: FilmProfile): void {
     new Float32Array([lut.dMin.r, lut.dMin.g, lut.dMin.b, lut.dMax.r, lut.dMax.g, lut.dMax.b])
   );
 
-  // dMin/dMax también viven en grainUniformBuffer y previewUniformBuffer,
-  // ambos en el offset 0 — en previewUniformBuffer esto deja intacta la
-  // saturación/viveza del usuario (índices 6-7).
+  // dMin/dMax también viven en grainUniformBuffer, offset 0.
   const dMinDMax = new Float32Array([lut.dMin.r, lut.dMin.g, lut.dMin.b, lut.dMax.r, lut.dMax.g, lut.dMax.b]);
   state.device.queue.writeBuffer(state.grainUniformBuffer, 0, dMinDMax);
-  state.device.queue.writeBuffer(state.previewUniformBuffer, 0, dMinDMax);
 
   state.paperOffsets = computeChannelOffsets(film);
   updatePrintTemperature(state, parseFloat(paperTemperatureSlider.value) / 100);
-}
 
-function isPaperEnabled(): boolean {
-  return paperSelect.value === "endura";
+  // Carácter de color propio de la película nueva (warmth/tint por zona
+  // tonal + sesgo de saturación/viveza) — se suma al ajuste manual del
+  // usuario, que se deja intacto.
+  updateSceneGrade(state);
+  updateSaturationVibrance(state);
 }
 
 function renderCurrent(): void {
   if (!app || !app.sourceTexture || !app.encodedTexture) return;
   app.pipeline.render(app.sourceTexture);
-  const finalPass = isPaperEnabled() ? app.scannerPaperPass : app.previewEncodePass;
   // El resultado revelado se escribe primero a una textura intermedia (no
   // directo al canvas) para poder mezclarlo con la foto original en el
   // paso de "intensidad del preset" antes de mostrarlo.
-  app.pipeline.renderFinalToTexture(finalPass, ["sharpened"], app.encodedTexture);
+  app.pipeline.renderFinalToTexture(app.scannerPaperPass, ["sharpened"], app.encodedTexture);
   app.pipeline.displayFinalWithTextures(
     app.lookIntensityPass,
     [app.sourceTexture, app.encodedTexture],
@@ -891,117 +856,6 @@ function renderCurrent(): void {
 
 function updateLookIntensity(state: AppState, intensity: number): void {
   state.device.queue.writeBuffer(state.lookIntensityParamsBuffer, 0, new Float32Array([intensity]));
-}
-
-/** Vuelve al preview rápido en tiempo real, descartando cualquier render riguroso previo. */
-function backToPreview(): void {
-  if (!app) return;
-  app.renderGeneration++; // invalida cualquier render riguroso en curso
-  if (app.mode === "preview") return;
-  app.mode = "preview";
-  downloadButton.hidden = true;
-  renderButton.disabled = false;
-  renderButton.textContent = "Renderizar grano riguroso";
-  renderProgress.hidden = true;
-  updateVisibleLayer();
-}
-
-function setRenderProgress(fraction: number): void {
-  const pct = Math.round(fraction * 100);
-  renderProgressFill.style.width = `${pct}%`;
-  renderProgressText.textContent = `${pct}%`;
-}
-
-function buildRigorousParams(state: AppState): RigorousRenderParams {
-  return {
-    grain: {
-      radius: computeGrainSizePx(state.imageWidth, parseFloat(grainSizeSlider.value)),
-      seed: GRAIN_SEED,
-      samplesPerPixel: RIGOROUS_SAMPLES_PER_PIXEL,
-    },
-    filmDMin: state.lut.dMin,
-    filmDMax: state.lut.dMax,
-    acutance: {
-      radiusPx: computeAcutanceRadiusPx(state.imageWidth),
-      amount: ACUTANCE_BASE_AMOUNT * parseFloat(acutanceSlider.value),
-    },
-    paper: {
-      enabled: isPaperEnabled(),
-      offsets: computePaperOffsets(state, parseFloat(paperTemperatureSlider.value) / 100),
-    },
-  };
-}
-
-async function startRigorousRender(): Promise<void> {
-  if (!app || !app.sourceTexture) return;
-  const state = app;
-
-  state.mode = "rendering";
-  state.renderGeneration++;
-  const generation = state.renderGeneration;
-
-  renderButton.disabled = true;
-  renderButton.textContent = "Renderizando...";
-  downloadButton.hidden = true;
-  renderProgress.hidden = false;
-  setRenderProgress(0);
-
-  try {
-    const { data, width, height } = await state.pipeline.readTextureRGBA16F("density");
-    if (generation !== state.renderGeneration) return; // se canceló mientras leíamos
-
-    if (!state.renderWorker) {
-      state.renderWorker = new Worker(new URL("./render/rigorousRender.worker.ts", import.meta.url), {
-        type: "module",
-      });
-    }
-    const worker = state.renderWorker;
-
-    const result = await new Promise<{ image: Uint8ClampedArray; width: number; height: number }>(
-      (resolve, reject) => {
-        const onMessage = (e: MessageEvent<WorkerResponse>) => {
-          if (generation !== state.renderGeneration) return; // resultado obsoleto, ignorar
-          if (e.data.type === "progress") {
-            setRenderProgress(e.data.fraction);
-          } else {
-            worker.removeEventListener("message", onMessage);
-            resolve({ image: e.data.image, width: e.data.width, height: e.data.height });
-          }
-        };
-        worker.addEventListener("message", onMessage);
-        worker.addEventListener("error", reject, { once: true });
-        worker.postMessage({ density: data, width, height, params: buildRigorousParams(state) }, [
-          data.buffer,
-        ]);
-      }
-    );
-
-    if (generation !== state.renderGeneration) return; // el usuario siguió editando mientras se calculaba
-
-    renderedCanvas.width = result.width;
-    renderedCanvas.height = result.height;
-    const ctx2d = renderedCanvas.getContext("2d")!;
-    const imageData = new ImageData(
-      new Uint8ClampedArray(result.image.buffer as ArrayBuffer),
-      result.width,
-      result.height
-    );
-    ctx2d.putImageData(imageData, 0, 0);
-
-    state.mode = "rendered";
-    updateVisibleLayer();
-    downloadButton.hidden = false;
-    renderProgress.hidden = true;
-    renderButton.disabled = false;
-    renderButton.textContent = "Renderizar grano riguroso";
-    setStatus("Render riguroso completado (grano booleano real, no aproximación).");
-  } catch (err) {
-    console.error(err);
-    if (generation === state.renderGeneration) {
-      setStatus(err instanceof Error ? err.message : "Error al renderizar.");
-      backToPreview();
-    }
-  }
 }
 
 /**
@@ -1062,17 +916,72 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-async function downloadRenderedImage(): Promise<void> {
-  const blob = await canvasToBlob(renderedCanvas);
-  await saveBlob(blob, "revelado.png", "image/png", "Imagen PNG");
-}
-
-/** Exporta lo que se ve ahora mismo: el render riguroso si ya está hecho, si no el preview en tiempo real. */
 async function exportCurrentImage(): Promise<void> {
   if (!app || !app.sourceTexture) return;
-  const canvas = app.mode === "rendered" ? renderedCanvas : processedCanvas;
-  const blob = await canvasToBlob(canvas);
+  const blob = await canvasToBlob(processedCanvas);
   await saveBlob(blob, "nw-film.png", "image/png", "Imagen PNG");
+}
+
+let filmGridObjectUrls: string[] = [];
+
+function closeFilmGrid(): void {
+  filmGridOverlay.hidden = true;
+  for (const url of filmGridObjectUrls) URL.revokeObjectURL(url);
+  filmGridObjectUrls = [];
+  filmGrid.innerHTML = "";
+}
+
+/**
+ * Renderiza la foto actual con cada película del catálogo (dejando el
+ * resto de sliders tal cual están) y las muestra en una cuadrícula para
+ * comparar a simple vista. Reutiliza el pipeline real uno a uno — no hay
+ * un modo "multi-película" en la GPU, así que cada captura es un
+ * renderCurrent() normal seguido de una lectura del canvas.
+ */
+async function openFilmGrid(): Promise<void> {
+  if (!app || !app.sourceTexture) return;
+  const state = app;
+  const originalFilmId = state.currentFilm.id;
+
+  filmGridToggleButton.disabled = true;
+  filmGrid.innerHTML = "";
+  filmGridStatus.textContent = "Generando cuadrícula...";
+  filmGridOverlay.hidden = false;
+
+  try {
+    for (const film of FILMS) {
+      loadFilmIntoState(state, film);
+      renderCurrent();
+      await state.device.queue.onSubmittedWorkDone();
+      const blob = await canvasToBlob(processedCanvas);
+      const url = URL.createObjectURL(blob);
+      filmGridObjectUrls.push(url);
+
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "film-grid-cell";
+      cell.title = `Usar ${film.label}`;
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = film.label;
+      const caption = document.createElement("span");
+      caption.textContent = film.label;
+      cell.appendChild(img);
+      cell.appendChild(caption);
+      cell.addEventListener("click", () => {
+        filmSelect.value = film.id;
+        filmSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        closeFilmGrid();
+      });
+      filmGrid.appendChild(cell);
+    }
+    filmGridStatus.textContent = "";
+  } finally {
+    // Vuelve a la película que estaba activa antes de abrir la cuadrícula.
+    loadFilmIntoState(state, getFilm(originalFilmId));
+    renderCurrent();
+    filmGridToggleButton.disabled = false;
+  }
 }
 
 function collectCurrentPreset(): PresetValues {
@@ -1091,7 +1000,6 @@ function collectCurrentPreset(): PresetValues {
     grainSize: parseFloat(grainSizeSlider.value),
     acutance: parseFloat(acutanceSlider.value),
     softening: parseFloat(softeningSlider.value),
-    paper: paperSelect.value,
     paperTemperature: parseFloat(paperTemperatureSlider.value),
   };
 }
@@ -1126,10 +1034,8 @@ function applyPresetValues(values: PresetValues): void {
   acutanceValueLabel.textContent = values.acutance.toFixed(2);
   softeningSlider.value = values.softening.toFixed(2);
   softeningValueLabel.textContent = values.softening.toFixed(2);
-  paperSelect.value = values.paper;
   paperTemperatureSlider.value = String(values.paperTemperature);
   paperTemperatureValueLabel.textContent = paperTemperatureSlider.value;
-  paperTemperatureSlider.disabled = !isPaperEnabled();
 
   if (!app) return;
   updateSceneGrade(app);
@@ -1139,13 +1045,12 @@ function applyPresetValues(values: PresetValues): void {
     new Float32Array([parseFloat(exposureSlider.value)])
   );
   updateHalationIntensity(app, parseFloat(halationSlider.value));
-  updateSaturationVibrance(app, parseFloat(saturationSlider.value) / 100, parseFloat(vibranceSlider.value) / 100);
+  updateSaturationVibrance(app);
   updateGrainIntensity(app, parseFloat(grainSlider.value));
   if (app.imageWidth) updateGrainSize(app, app.imageWidth, parseFloat(grainSizeSlider.value));
   updateAcutanceAmount(app, parseFloat(acutanceSlider.value));
   updateSofteningAmount(app, parseFloat(softeningSlider.value));
   updatePrintTemperature(app, parseFloat(paperTemperatureSlider.value) / 100);
-  backToPreview();
   renderCurrent();
 }
 
@@ -1171,7 +1076,6 @@ function parsePresetValues(raw: unknown): PresetValues {
     grainSize: coercePresetNumber(obj.grainSize, PRESET_DEFAULTS.grainSize),
     acutance: coercePresetNumber(obj.acutance, PRESET_DEFAULTS.acutance),
     softening: coercePresetNumber(obj.softening, PRESET_DEFAULTS.softening),
-    paper: obj.paper === "none" ? "none" : PRESET_DEFAULTS.paper,
     paperTemperature: coercePresetNumber(obj.paperTemperature, PRESET_DEFAULTS.paperTemperature),
   };
 }
@@ -1236,7 +1140,7 @@ async function handleFile(file: File): Promise<void> {
     updateAcutanceAmount(state, parseFloat(acutanceSlider.value));
     updateSofteningBlurParams(state, bitmap.width, bitmap.height);
     updateSofteningAmount(state, parseFloat(softeningSlider.value));
-    updateSaturationVibrance(state, parseFloat(saturationSlider.value) / 100, parseFloat(vibranceSlider.value) / 100);
+    updateSaturationVibrance(state);
 
     state.sourceTexture?.destroy();
     state.sourceTexture = createTextureFromBitmap(state.device, bitmap, "rgba8unorm");
@@ -1251,7 +1155,6 @@ async function handleFile(file: File): Promise<void> {
     state.imageHeight = bitmap.height;
 
     showOriginal = false;
-    backToPreview();
     renderCurrent();
     fitToViewport();
 
@@ -1295,14 +1198,12 @@ lookIntensitySlider.addEventListener("input", () => {
   lookIntensityValueLabel.textContent = lookIntensitySlider.value;
   if (!app) return;
   updateLookIntensity(app, parseFloat(lookIntensitySlider.value) / 100);
-  backToPreview();
   renderCurrent();
 });
 
 filmSelect.addEventListener("change", () => {
   if (!app) return;
   loadFilmIntoState(app, getFilm(filmSelect.value));
-  backToPreview();
   renderCurrent();
 });
 
@@ -1329,7 +1230,6 @@ function makeSceneGradeSliderHandler(slider: HTMLInputElement, label: HTMLSpanEl
     label.textContent = slider.value;
     if (!app) return;
     updateSceneGrade(app);
-    backToPreview();
     renderCurrent();
   };
 }
@@ -1347,7 +1247,6 @@ exposureSlider.addEventListener("input", () => {
   if (!app) return;
   // offset 20 bytes = índice 5 del array de floats (exposureStops en CurveParams)
   app.device.queue.writeBuffer(app.exposureUniformBuffer, 5 * 4, new Float32Array([stops]));
-  backToPreview();
   renderCurrent();
 });
 
@@ -1356,7 +1255,6 @@ grainSlider.addEventListener("input", () => {
   grainValueLabel.textContent = multiplier.toFixed(2);
   if (!app) return;
   updateGrainIntensity(app, multiplier);
-  backToPreview();
   renderCurrent();
 });
 
@@ -1365,7 +1263,6 @@ grainSizeSlider.addEventListener("input", () => {
   grainSizeValueLabel.textContent = multiplier.toFixed(2);
   if (!app || !app.imageWidth) return;
   updateGrainSize(app, app.imageWidth, multiplier);
-  backToPreview();
   renderCurrent();
 });
 
@@ -1374,7 +1271,6 @@ acutanceSlider.addEventListener("input", () => {
   acutanceValueLabel.textContent = multiplier.toFixed(2);
   if (!app) return;
   updateAcutanceAmount(app, multiplier);
-  backToPreview();
   renderCurrent();
 });
 
@@ -1383,7 +1279,6 @@ softeningSlider.addEventListener("input", () => {
   softeningValueLabel.textContent = multiplier.toFixed(2);
   if (!app) return;
   updateSofteningAmount(app, multiplier);
-  backToPreview();
   renderCurrent();
 });
 
@@ -1392,7 +1287,6 @@ halationSlider.addEventListener("input", () => {
   halationValueLabel.textContent = multiplier.toFixed(2);
   if (!app) return;
   updateHalationIntensity(app, multiplier);
-  backToPreview();
   renderCurrent();
 });
 
@@ -1400,38 +1294,19 @@ function handleSaturationVibranceInput(): void {
   saturationValueLabel.textContent = saturationSlider.value;
   vibranceValueLabel.textContent = vibranceSlider.value;
   if (!app) return;
-  updateSaturationVibrance(app, parseFloat(saturationSlider.value) / 100, parseFloat(vibranceSlider.value) / 100);
-  backToPreview();
+  updateSaturationVibrance(app);
   renderCurrent();
 }
 
 saturationSlider.addEventListener("input", handleSaturationVibranceInput);
 vibranceSlider.addEventListener("input", handleSaturationVibranceInput);
 
-paperSelect.addEventListener("change", () => {
-  paperTemperatureSlider.disabled = !isPaperEnabled();
-  backToPreview();
-  renderCurrent();
-});
-
 paperTemperatureSlider.addEventListener("input", () => {
   const value = parseFloat(paperTemperatureSlider.value);
   paperTemperatureValueLabel.textContent = paperTemperatureSlider.value;
   if (!app) return;
   updatePrintTemperature(app, value / 100);
-  backToPreview();
   renderCurrent();
-});
-
-renderButton.addEventListener("click", () => {
-  startRigorousRender();
-});
-
-downloadButton.addEventListener("click", () => {
-  downloadRenderedImage().catch((err) => {
-    console.error(err);
-    setStatus(err instanceof Error ? err.message : "Error al descargar el render.");
-  });
 });
 
 zoomSlider.addEventListener("input", () => {
@@ -1453,6 +1328,24 @@ sideBySideToggleButton.addEventListener("click", () => {
   sideBySideToggleButton.classList.toggle("active", sideBySide);
   updateVisibleLayer();
   fitToViewport();
+});
+
+filmGridToggleButton.addEventListener("click", () => {
+  openFilmGrid().catch((err) => {
+    console.error(err);
+    setStatus(err instanceof Error ? err.message : "Error al generar la cuadrícula.");
+    closeFilmGrid();
+  });
+});
+
+filmGridClose.addEventListener("click", () => closeFilmGrid());
+
+filmGridOverlay.addEventListener("click", (e) => {
+  if (e.target === filmGridOverlay) closeFilmGrid();
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !filmGridOverlay.hidden) closeFilmGrid();
 });
 
 // Pinch en trackpad: los navegadores lo entregan como evento "wheel" con

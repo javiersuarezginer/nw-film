@@ -23,6 +23,7 @@
                 <button id="export-button" type="button">Exportar</button>
                 <button id="ab-toggle" type="button">Ver original</button>
                 <button id="side-by-side-toggle" type="button">Comparar</button>
+                <button id="film-grid-toggle" type="button">Cuadrícula de películas</button>
               </div>
               <div id="zoom-controls">
                 <label for="zoom-slider">Zoom <span id="zoom-value">100</span>%</label>
@@ -44,10 +45,18 @@
                 <div class="canvas-pane" id="pane-processed">
                   <div class="canvas-stack">
                     <canvas id="canvas-processed"></canvas>
-                    <canvas id="canvas-rendered" hidden></canvas>
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div id="film-grid-overlay" hidden>
+              <div id="film-grid-header">
+                <span>Cuadrícula de películas</span>
+                <button id="film-grid-close" type="button" title="Cerrar">✕</button>
+              </div>
+              <div id="film-grid-status"></div>
+              <div id="film-grid"></div>
             </div>
           </div>
 
@@ -91,6 +100,14 @@
                 <button type="button" class="reset-btn" data-reset="tint-slider" data-default="0" title="Restablecer">↺</button>
               </div>
               <input id="tint-slider" type="range" min="-100" max="100" step="1" value="0" />
+
+              <div class="slider-header">
+                <label for="paper-temperature-slider">
+                  Temperatura del papel: <span id="paper-temperature-value">0</span>
+                </label>
+                <button type="button" class="reset-btn" data-reset="paper-temperature-slider" data-default="0" title="Restablecer">↺</button>
+              </div>
+              <input id="paper-temperature-slider" type="range" min="-100" max="100" step="1" value="0" />
             </section>
 
             <section class="control-section">
@@ -196,32 +213,6 @@
                 <button type="button" class="reset-btn" data-reset="softening-slider" data-default="1" title="Restablecer">↺</button>
               </div>
               <input id="softening-slider" type="range" min="0" max="2" step="0.1" value="1" />
-            </section>
-
-            <section class="control-section">
-              <h3>Salida</h3>
-              <label for="paper-select">Papel</label>
-              <select id="paper-select">
-                <option value="endura" selected>Portra Endura</option>
-                <option value="none">Ninguno (vista previa plana)</option>
-              </select>
-
-              <div class="slider-header">
-                <label for="paper-temperature-slider">
-                  Temperatura del papel: <span id="paper-temperature-value">0</span>
-                </label>
-                <button type="button" class="reset-btn" data-reset="paper-temperature-slider" data-default="0" title="Restablecer">↺</button>
-              </div>
-              <input id="paper-temperature-slider" type="range" min="-100" max="100" step="1" value="0" />
-
-              <div id="render-controls">
-                <button id="render-button" type="button">Renderizar grano riguroso</button>
-                <div id="render-progress" hidden>
-                  <div id="render-progress-bar"><div id="render-progress-fill"></div></div>
-                  <span id="render-progress-text">0%</span>
-                </div>
-                <button id="download-button" type="button" hidden>Descargar PNG</button>
-              </div>
             </section>
           </aside>
         </div>

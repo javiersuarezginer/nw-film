@@ -17,7 +17,8 @@ import opticalSofteningShader from "./shaders/opticalSoftening.wgsl?raw";
 import previewEncodeShader from "./shaders/previewEncode.wgsl?raw";
 import scannerPaperShader from "./shaders/scannerPaper.wgsl?raw";
 import lookIntensityShader from "./shaders/lookIntensity.wgsl?raw";
-import { buildCurveLUT, sampleDensity, PORTRA_400_SOURCE, type CurveLUT } from "./color-science/portra400/characteristicCurve";
+import type { CurveLUT } from "./color-science/curveModel";
+import { FILMS, DEFAULT_FILM_ID, getFilm, type FilmProfile } from "./color-science/films/registry";
 import { buildPaperLUT, PAPER_DENSITY_MIN, PAPER_DENSITY_MAX } from "./color-science/portraEndura/paperCurve";
 import type { RigorousRenderParams } from "./render/rigorousRender";
 import type { WorkerResponse } from "./render/rigorousRender.worker";
@@ -199,6 +200,14 @@ const filmSelect = document.querySelector<HTMLSelectElement>("#film-select")!;
 const lookIntensitySlider = document.querySelector<HTMLInputElement>("#look-intensity-slider")!;
 const lookIntensityValueLabel = document.querySelector<HTMLSpanElement>("#look-intensity-value")!;
 
+for (const film of FILMS) {
+  const option = document.createElement("option");
+  option.value = film.id;
+  option.textContent = film.label;
+  if (film.id === DEFAULT_FILM_ID) option.selected = true;
+  filmSelect.appendChild(option);
+}
+
 const renderButton = document.querySelector<HTMLButtonElement>("#render-button")!;
 const renderProgress = document.querySelector<HTMLDivElement>("#render-progress")!;
 const renderProgressFill = document.querySelector<HTMLDivElement>("#render-progress-fill")!;
@@ -212,6 +221,21 @@ const fitButton = document.querySelector<HTMLButtonElement>("#fit-button")!;
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
+}
+
+/** Alinea los tres canales del negativo en su punto de exposición de referencia, igual que el filtro de la ampliadora en un laboratorio real (ver scannerPaper.wgsl). */
+function computeChannelOffsets(film: FilmProfile): { r: number; g: number; b: number } {
+  const refDensity = {
+    r: film.curveModel.sampleDensity("r", film.source.logHRef),
+    g: film.curveModel.sampleDensity("g", film.source.logHRef),
+    b: film.curveModel.sampleDensity("b", film.source.logHRef),
+  };
+  const commonTarget = (refDensity.r + refDensity.g + refDensity.b) / 3;
+  return {
+    r: commonTarget - refDensity.r,
+    g: commonTarget - refDensity.g,
+    b: commonTarget - refDensity.b,
+  };
 }
 
 function computeGrainSizePx(width: number, sizeMultiplier: number): { r: number; g: number; b: number } {
@@ -235,7 +259,9 @@ interface AppState {
   context: GPUCanvasContext;
   format: GPUTextureFormat;
   pipeline: Pipeline;
+  currentFilm: FilmProfile;
   lut: CurveLUT;
+  lutTexture: GPUTexture;
   sceneGradeParamsBuffer: GPUBuffer;
   exposureUniformBuffer: GPUBuffer;
   blurHBuffer: GPUBuffer;
@@ -330,7 +356,8 @@ async function ensureApp(): Promise<AppState> {
 
   const { device, context, format } = await initWebGPU(processedCanvas);
 
-  const lut = buildCurveLUT(512, 3.0);
+  const initialFilm = getFilm(DEFAULT_FILM_ID);
+  const lut = initialFilm.curveModel.buildCurveLUT(512, 3.0);
   const lutTexture = createLUTTexture(device, lut.data, lut.width);
 
   const curveParams = new Float32Array(CURVE_PARAMS_FLOATS);
@@ -338,7 +365,7 @@ async function ensureApp(): Promise<AppState> {
     lut.domainMin,
     lut.domainMax,
     lut.width,
-    PORTRA_400_SOURCE.logHRef,
+    initialFilm.source.logHRef,
     MIDDLE_GRAY,
     DEFAULT_EXPOSURE_STOPS, // se actualiza con el slider a partir de aquí
     lut.dMin.r,
@@ -441,20 +468,7 @@ async function ensureApp(): Promise<AppState> {
   const paperLut = buildPaperLUT(512, 1.5);
   const paperLutTexture = createLUTTexture(device, paperLut.data, paperLut.width);
 
-  // Alinea los tres canales en el punto de exposición de referencia,
-  // igual que el filtro de la ampliadora en un laboratorio real (ver
-  // scannerPaper.wgsl).
-  const refDensity = {
-    r: sampleDensity("r", PORTRA_400_SOURCE.logHRef),
-    g: sampleDensity("g", PORTRA_400_SOURCE.logHRef),
-    b: sampleDensity("b", PORTRA_400_SOURCE.logHRef),
-  };
-  const commonTarget = (refDensity.r + refDensity.g + refDensity.b) / 3;
-  const paperOffsets = {
-    r: commonTarget - refDensity.r,
-    g: commonTarget - refDensity.g,
-    b: commonTarget - refDensity.b,
-  };
+  const paperOffsets = computeChannelOffsets(initialFilm);
 
   const scannerPaperParams = new Float32Array(SCANNER_PAPER_PARAMS_FLOATS);
   scannerPaperParams.set([
@@ -628,7 +642,9 @@ async function ensureApp(): Promise<AppState> {
     context,
     format,
     pipeline,
+    currentFilm: initialFilm,
     lut,
+    lutTexture,
     sceneGradeParamsBuffer,
     exposureUniformBuffer,
     blurHBuffer,
@@ -806,6 +822,52 @@ function updatePrintTemperature(state: AppState, printTemperature: number): void
     0,
     new Float32Array([offsets.r, offsets.g, offsets.b])
   );
+}
+
+/**
+ * Cambia la película activa: recarga su curva en la GPU y realinea el
+ * offset de papel, sin recrear ningún buffer ni textura (la LUT siempre
+ * mide 512x1, solo cambia su contenido). El grano, el halation y el
+ * ajuste manual de exposición del usuario NO dependen de la película —
+ * siguen constantes compartidas hasta que haya fotos de referencia reales
+ * por emulsión (ver decisions.md).
+ */
+function loadFilmIntoState(state: AppState, film: FilmProfile): void {
+  state.currentFilm = film;
+  const lut = film.curveModel.buildCurveLUT(512, 3.0);
+  state.lut = lut;
+
+  state.device.queue.writeTexture(
+    { texture: state.lutTexture },
+    lut.data.buffer as ArrayBuffer,
+    { bytesPerRow: lut.width * 4 * 4 },
+    [lut.width, 1]
+  );
+
+  // offset 0 bytes = índices 0-3 (domainMin, domainMax, width, logHRef) en
+  // CurveParams; índice 4 (middleGray) y 5 (exposureStops, ajuste manual
+  // del usuario) se dejan intactos.
+  state.device.queue.writeBuffer(
+    state.exposureUniformBuffer,
+    0,
+    new Float32Array([lut.domainMin, lut.domainMax, lut.width, film.source.logHRef])
+  );
+  // offset 24 bytes = índices 6-11 (dMin r/g/b, dMax r/g/b) en CurveParams.
+  state.device.queue.writeBuffer(
+    state.exposureUniformBuffer,
+    6 * 4,
+    new Float32Array([lut.dMin.r, lut.dMin.g, lut.dMin.b, lut.dMax.r, lut.dMax.g, lut.dMax.b])
+  );
+
+  // dMin/dMax también viven en grainUniformBuffer y previewUniformBuffer,
+  // ambos en el offset 0 — en previewUniformBuffer esto deja intacta la
+  // saturación/viveza del usuario (índices 6-7).
+  const dMinDMax = new Float32Array([lut.dMin.r, lut.dMin.g, lut.dMin.b, lut.dMax.r, lut.dMax.g, lut.dMax.b]);
+  state.device.queue.writeBuffer(state.grainUniformBuffer, 0, dMinDMax);
+  state.device.queue.writeBuffer(state.previewUniformBuffer, 0, dMinDMax);
+
+  state.paperOffsets = computeChannelOffsets(film);
+  updatePrintTemperature(state, parseFloat(paperTemperatureSlider.value) / 100);
 }
 
 function isPaperEnabled(): boolean {
@@ -1238,10 +1300,8 @@ lookIntensitySlider.addEventListener("input", () => {
 });
 
 filmSelect.addEventListener("change", () => {
-  // Por ahora solo hay una película (Portra 400); el desplegable ya
-  // queda listo para más emulsiones sin tener que tocar el resto del
-  // flujo de eventos.
   if (!app) return;
+  loadFilmIntoState(app, getFilm(filmSelect.value));
   backToPreview();
   renderCurrent();
 });

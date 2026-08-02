@@ -1,10 +1,10 @@
 import { createCurveModel, type Channel, type CurveLUT } from "../curveModel";
-import { portra400CharacteristicCurve, PORTRA_400_SOURCE } from "./characteristicCurveData";
+import { fujiPro400hCharacteristicCurve, FUJI_PRO_400H_SOURCE } from "./characteristicCurveData";
 
 export type { Channel, CurveLUT };
-export { PORTRA_400_SOURCE };
+export { FUJI_PRO_400H_SOURCE };
 
-const model = createCurveModel(portra400CharacteristicCurve);
+const model = createCurveModel(fujiPro400hCharacteristicCurve);
 
 export const MEASURED_LOG_E_MIN = model.measuredLogEMin;
 export const MEASURED_LOG_E_MAX = model.measuredLogEMax;

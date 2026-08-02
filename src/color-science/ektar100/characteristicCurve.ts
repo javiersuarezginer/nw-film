@@ -1,10 +1,10 @@
 import { createCurveModel, type Channel, type CurveLUT } from "../curveModel";
-import { portra400CharacteristicCurve, PORTRA_400_SOURCE } from "./characteristicCurveData";
+import { ektar100CharacteristicCurve, EKTAR_100_SOURCE } from "./characteristicCurveData";
 
 export type { Channel, CurveLUT };
-export { PORTRA_400_SOURCE };
+export { EKTAR_100_SOURCE };
 
-const model = createCurveModel(portra400CharacteristicCurve);
+const model = createCurveModel(ektar100CharacteristicCurve);
 
 export const MEASURED_LOG_E_MIN = model.measuredLogEMin;
 export const MEASURED_LOG_E_MAX = model.measuredLogEMax;

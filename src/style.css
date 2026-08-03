@@ -365,8 +365,8 @@ body {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem 0.35rem;
   align-content: start;
 }
 
@@ -374,24 +374,24 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
-  padding: 0.5rem;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
   color: #eee;
   font-size: 0.8rem;
   text-align: center;
 }
 
-.film-grid-cell:hover {
-  border-color: #4ea1ff;
-}
-
 .film-grid-cell img {
   width: 100%;
-  aspect-ratio: 3 / 2;
-  object-fit: contain;
-  background: #000;
-  border-radius: 4px;
+  height: auto;
+  display: block;
+  outline: 1px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 0.15s;
+}
+
+.film-grid-cell:hover img {
+  outline-color: #4ea1ff;
 }

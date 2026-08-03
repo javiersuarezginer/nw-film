@@ -1025,15 +1025,14 @@ async function openFilmGrid(): Promise<void> {
     // Vuelve a la película que estaba activa antes de abrir la cuadrícula
     // (puede ser una custom del usuario, no solo una de las 5 reales).
     loadFilmIntoState(state, getAnyFilm(originalFilmId));
-    updateCustomFilmUi(state);
+    updateCustomFilmUi(state.currentFilm);
     renderCurrent();
     filmGridToggleButton.disabled = false;
   }
 }
 
 /** Muestra/oculta lo que solo aplica a películas creadas por el usuario (nota de análisis, botones de eliminar/exportar). */
-function updateCustomFilmUi(state: AppState): void {
-  const film = state.currentFilm;
+function updateCustomFilmUi(film: FilmProfile): void {
   if (film.isCustom) {
     const record = getCustomFilmRecords().find((r) => r.id === film.id);
     filmAnalysisNote.textContent = record?.analysisNote ? `IA: ${record.analysisNote}` : "";
@@ -1175,8 +1174,7 @@ async function handleCreateFilmAnalyze(): Promise<void> {
 }
 
 async function handleFilmExport(): Promise<void> {
-  if (!app || !app.currentFilm.isCustom) return;
-  const record = getCustomFilmRecords().find((r) => r.id === app!.currentFilm.id);
+  const record = getCustomFilmRecords().find((r) => r.id === filmSelect.value);
   if (!record) return;
   const json = JSON.stringify(record, null, 2);
   const blob = new Blob([json], { type: "application/json" });
@@ -1434,16 +1432,19 @@ lookIntensitySlider.addEventListener("input", () => {
 });
 
 filmSelect.addEventListener("change", () => {
+  // La nota/botones de película custom no dependen de que haya imagen
+  // cargada (app puede ser null todavía) — el render sí.
+  updateCustomFilmUi(getAnyFilm(filmSelect.value));
   if (!app) return;
   loadFilmIntoState(app, getAnyFilm(filmSelect.value));
-  updateCustomFilmUi(app);
   renderCurrent();
 });
 
 deleteFilmButton.addEventListener("click", () => {
-  if (!app || !app.currentFilm.isCustom) return;
-  if (!confirm(`¿Eliminar "${app.currentFilm.label}"? Esta acción no se puede deshacer.`)) return;
-  removeCustomFilm(app.currentFilm.id);
+  const film = getAnyFilm(filmSelect.value);
+  if (!film.isCustom) return;
+  if (!confirm(`¿Eliminar "${film.label}"? Esta acción no se puede deshacer.`)) return;
+  removeCustomFilm(film.id);
   renderFilmSelectOptions(filmSelect, DEFAULT_FILM_ID);
   filmSelect.value = DEFAULT_FILM_ID;
   filmSelect.dispatchEvent(new Event("change", { bubbles: true }));

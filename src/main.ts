@@ -1101,7 +1101,92 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-async function downscaleImageToJpegBase64(file: File): Promise<{ base64: string; mediaType: string }> {
+interface ZoneColorStats {
+  r: number;
+  g: number;
+  b: number;
+  /** Fracción de píxeles de la foto que cayeron en esta zona — si es muy baja, la medición es poco fiable. */
+  pixelFraction: number;
+}
+
+interface ReferenceImageStats {
+  shadows: ZoneColorStats;
+  midtones: ZoneColorStats;
+  highlights: ZoneColorStats;
+  /** Percentil 5 y 95 de luminancia (0-255) — contraste real aproximado de la escena. */
+  lumaP5: number;
+  lumaP95: number;
+}
+
+/**
+ * Mide de verdad el color medio en sombras/medios/luces (por umbral de
+ * luminancia, mismos pesos Rec.709 que sceneGrade.wgsl) y el contraste
+ * aproximado (percentil 5/95 de luminancia) de la foto de referencia —
+ * para que la IA base el carácter de color en datos reales en vez de
+ * adivinarlos mirando. Mismo criterio que ya se usó a mano con numpy en
+ * la sesión de calibración de grano/color (ver decisions.md): medir
+ * parches de sombra/piel/cielo en vez de "a ojo". El grano/halation/forma
+ * de curva se dejan al juicio visual de la IA — un análisis de parches
+ * simple no discrimina bien ahí (ya se intentó y falló para el grano, ver
+ * decisions.md 2026-08-03).
+ */
+function computeReferenceImageStats(canvas: HTMLCanvasElement): ReferenceImageStats {
+  const ctx = canvas.getContext("2d")!;
+  const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const totalPixels = width * height;
+
+  const histogram = new Uint32Array(256);
+  const zones = {
+    shadows: { r: 0, g: 0, b: 0, count: 0 },
+    midtones: { r: 0, g: 0, b: 0, count: 0 },
+    highlights: { r: 0, g: 0, b: 0, count: 0 },
+  };
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    histogram[Math.min(255, Math.max(0, Math.round(luma)))]++;
+
+    const zone = luma < 85 ? zones.shadows : luma > 170 ? zones.highlights : zones.midtones;
+    zone.r += r;
+    zone.g += g;
+    zone.b += b;
+    zone.count++;
+  }
+
+  function toZoneStats(zone: { r: number; g: number; b: number; count: number }): ZoneColorStats {
+    if (zone.count === 0) return { r: 0, g: 0, b: 0, pixelFraction: 0 };
+    return { r: zone.r / zone.count, g: zone.g / zone.count, b: zone.b / zone.count, pixelFraction: zone.count / totalPixels };
+  }
+
+  let lumaP5: number | null = null;
+  let lumaP95: number | null = null;
+  let cumulative = 0;
+  const p5Target = totalPixels * 0.05;
+  const p95Target = totalPixels * 0.95;
+  for (let level = 0; level < 256; level++) {
+    cumulative += histogram[level];
+    if (lumaP5 === null && cumulative >= p5Target) lumaP5 = level;
+    if (lumaP95 === null && cumulative >= p95Target) {
+      lumaP95 = level;
+      break;
+    }
+  }
+
+  return {
+    shadows: toZoneStats(zones.shadows),
+    midtones: toZoneStats(zones.midtones),
+    highlights: toZoneStats(zones.highlights),
+    lumaP5: lumaP5 ?? 0,
+    lumaP95: lumaP95 ?? 255,
+  };
+}
+
+async function downscaleImageToJpegBase64(
+  file: File
+): Promise<{ base64: string; mediaType: string; stats: ReferenceImageStats }> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
@@ -1112,19 +1197,20 @@ async function downscaleImageToJpegBase64(file: File): Promise<{ base64: string;
   canvas.height = height;
   canvas.getContext("2d")!.drawImage(bitmap, 0, 0, width, height);
 
+  const stats = computeReferenceImageStats(canvas);
   const blob = await canvasToJpegBlob(canvas, 0.85);
   const base64 = await blobToBase64(blob);
-  return { base64, mediaType: "image/jpeg" };
+  return { base64, mediaType: "image/jpeg", stats };
 }
 
 /** Llama al endpoint de servidor (única pieza no-cliente del proyecto, ver api/analyze-film.ts) — la API key de Anthropic vive solo ahí. */
 async function requestFilmProposal(file: File, suggestedLabel: string): Promise<unknown> {
-  const { base64, mediaType } = await downscaleImageToJpegBase64(file);
+  const { base64, mediaType, stats } = await downscaleImageToJpegBase64(file);
 
   const response = await fetch("/api/analyze-film", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ imageBase64: base64, mediaType, suggestedLabel }),
+    body: JSON.stringify({ imageBase64: base64, mediaType, suggestedLabel, referenceStats: stats }),
   });
 
   const body: unknown = await response.json().catch(() => null);

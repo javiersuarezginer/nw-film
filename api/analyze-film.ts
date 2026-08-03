@@ -37,6 +37,72 @@ interface AnalyzeFilmRequestBody {
   imageBase64?: unknown;
   mediaType?: unknown;
   suggestedLabel?: unknown;
+  referenceStats?: unknown;
+}
+
+interface ZoneColorStats {
+  r: number;
+  g: number;
+  b: number;
+  pixelFraction: number;
+}
+
+interface ReferenceImageStats {
+  shadows: ZoneColorStats;
+  midtones: ZoneColorStats;
+  highlights: ZoneColorStats;
+  lumaP5: number;
+  lumaP95: number;
+}
+
+/**
+ * `referenceStats` lo calcula el cliente con Canvas (getImageData) sobre
+ * la misma foto que se sube — RGB medio real en sombras/medios/luces por
+ * umbral de luminancia, más contraste aproximado (percentil 5/95). Sirve
+ * para que la IA base `colorCharacter` en una medición real en vez de
+ * adivinarla solo mirando la imagen (ver decisions.md, sesión de
+ * "análisis superficial"). Si el cliente no lo manda o llega corrupto, se
+ * degrada con gracia — se sigue llamando a la IA, solo que sin esta
+ * sección del prompt (peor calibrado, no un fallo duro).
+ */
+function parseZoneStats(raw: unknown): ZoneColorStats | null {
+  if (!isRecord(raw)) return null;
+  const { r, g, b, pixelFraction } = raw;
+  if (![r, g, b, pixelFraction].every((v) => typeof v === "number" && Number.isFinite(v))) return null;
+  return { r: r as number, g: g as number, b: b as number, pixelFraction: pixelFraction as number };
+}
+
+function parseReferenceStats(raw: unknown): ReferenceImageStats | null {
+  if (!isRecord(raw)) return null;
+  const shadows = parseZoneStats(raw.shadows);
+  const midtones = parseZoneStats(raw.midtones);
+  const highlights = parseZoneStats(raw.highlights);
+  const { lumaP5, lumaP95 } = raw;
+  if (!shadows || !midtones || !highlights) return null;
+  if (typeof lumaP5 !== "number" || typeof lumaP95 !== "number" || !Number.isFinite(lumaP5) || !Number.isFinite(lumaP95)) {
+    return null;
+  }
+  return { shadows, midtones, highlights, lumaP5, lumaP95 };
+}
+
+function formatZone(label: string, zone: ZoneColorStats): string {
+  const pct = (zone.pixelFraction * 100).toFixed(0);
+  return `- ${label} (${pct}% de los píxeles): RGB medio ≈ (${zone.r.toFixed(0)}, ${zone.g.toFixed(0)}, ${zone.b.toFixed(0)})${
+    zone.pixelFraction < 0.03 ? " — pocos píxeles, medición poco fiable, pondérala menos" : ""
+  }`;
+}
+
+function buildMeasurementsSection(stats: ReferenceImageStats | null): string {
+  if (!stats) {
+    return "No hay mediciones reales de píxeles disponibles para esta foto — basa colorCharacter en tu propia inspección visual, con cautela.";
+  }
+  return `Mediciones REALES de esta foto (calculadas por código, no por ti) — básate en estos números para colorCharacter, no lo adivines solo mirando:
+${formatZone("Sombras", stats.shadows)}
+${formatZone("Medios tonos", stats.midtones)}
+${formatZone("Luces", stats.highlights)}
+- Contraste real de la escena: percentil 5 de luminancia ≈ ${stats.lumaP5}/255, percentil 95 ≈ ${stats.lumaP95}/255.
+
+Cómo usarlas: compara cada zona frente a un gris neutro (R=G=B). Si en sombras R > G, hay sesgo cálido → shadowWarmth positivo; si R < G, sesgo frío → negativo. Si G domina sobre el promedio de (R+B)/2, hay sesgo verde → shadowTint negativo (convención de este proyecto); si R y B dominan sobre G, sesgo magenta → positivo. Mismo razonamiento para highlightWarmth/highlightTint con los datos de luces. LA MAGNITUD debe ser proporcional a cuánto se desvía la medición de un gris neutro — no inventes una magnitud que no se corresponda con estos números. Un percentil 5-95 de luminancia muy amplio indica una escena de alto contraste real (curva con más pendiente en la zona lineal); un rango estrecho indica poco contraste real (curva más suave).`;
 }
 
 const PROPOSE_FILM_TOOL = {
@@ -103,10 +169,12 @@ const PROPOSE_FILM_TOOL = {
   },
 };
 
-function buildPrompt(suggestedLabel: string): string {
+function buildPrompt(suggestedLabel: string, stats: ReferenceImageStats | null): string {
   return `Eres un analista de emulación de película fotográfica para NW-FILM, un simulador de fotografía analógica cuyo motor de revelado es 100% físico y determinista (curva característica + halation + grano + papel). Tu trabajo NO es generar una imagen ni tocar el pipeline de render — es proponer, UNA SOLA VEZ, los parámetros de una "película" nueva a partir de esta foto de referencia, para que el motor determinista la renderice después con cualquier otra foto.
 
 IMPORTANTE — esto no es una digitalización de datasheet real. Las 5 películas reales del proyecto (Kodak Portra 400/160, Ektar 100, Fuji Pro 400H, Gold 200) se calibraron con curvas digitalizadas de datasheets oficiales de Kodak/Fuji. Esta foto de referencia es una imagen ya revelada/escaneada, sin datos de sensitómetro detrás — así que tu curva es una EMULACIÓN ESTILIZADA de esta foto en concreto, no una medición real. Sé honesto sobre esto en tu "analysisNote".
+
+${buildMeasurementsSection(stats)}
 
 Rango numérico de referencia (para que tu curva sea físicamente plausible dentro del motor ya existente):
 - Kodak Portra 400: logE de -3.41 a 0.56, densidad r 0.22-2.01 / g 0.64-2.46 / b 0.86-3.05 (orden b>g>r siempre).
@@ -124,7 +192,7 @@ Dos ejemplos reales del registro de películas de este proyecto, con su razonami
    grainCharacter: { sizeMultiplier: 1.05, intensityMultiplier: 1.1 }
    halationMultiplier: 0.8
 
-Analiza la foto adjunta con el mismo nivel de detalle: contraste tonal general (curva suave o dura, hombro en luces), carácter de color por zona (sombras/medios/luces, cálido/frío, verde/magenta), grano aparente (fino/grueso, visible/discreto) y halation aparente (bloom cálido en altas luces quemadas, si se aprecia).
+Para colorCharacter usa las mediciones reales de arriba, no tu impresión visual. Para el resto sí usa la vista: contraste tonal general (curva suave o dura, hombro en luces — apóyate también en el percentil 5/95 de arriba), grano aparente (fino/grueso, visible/discreto) y halation aparente (bloom cálido en altas luces quemadas, si se aprecia).
 
 ${suggestedLabel ? `El usuario sugiere el nombre "${suggestedLabel}" — úsalo tal cual como label.` : "Inventa un nombre corto y evocador en español (2-4 palabras)."}
 
@@ -145,7 +213,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   // Vercel ya parsea el body como JSON cuando content-type es application/json.
   const body: AnalyzeFilmRequestBody = isRecord(req.body) ? req.body : {};
-  const { imageBase64, mediaType, suggestedLabel } = body;
+  const { imageBase64, mediaType, suggestedLabel, referenceStats } = body;
+  const stats = parseReferenceStats(referenceStats);
 
   if (typeof mediaType !== "string" || !ALLOWED_MEDIA_TYPES.has(mediaType)) {
     res.status(400).json({ error: "Tipo de imagen no soportado (usa JPEG, PNG o WebP)." });
@@ -173,7 +242,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
-          { type: "text", text: buildPrompt(label) },
+          { type: "text", text: buildPrompt(label, stats) },
         ],
       },
     ],

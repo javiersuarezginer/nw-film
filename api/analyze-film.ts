@@ -20,6 +20,8 @@
  * (src/color-science/films/customFilm.ts), tanto aquí como en el cliente.
  */
 
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+
 const ANTHROPIC_VERSION = "2023-06-01";
 const MODEL_ID = "claude-sonnet-5";
 const MAX_TOKENS = 4096;
@@ -35,13 +37,6 @@ interface AnalyzeFilmRequestBody {
   imageBase64?: unknown;
   mediaType?: unknown;
   suggestedLabel?: unknown;
-}
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
 }
 
 const PROPOSE_FILM_TOOL = {
@@ -136,34 +131,34 @@ ${suggestedLabel ? `El usuario sugiere el nombre "${suggestedLabel}" — úsalo 
 Usa la herramienta "propose_film" para responder — exactamente 7 puntos de curva, todo en español.`;
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== "POST") {
-    return jsonResponse(405, { error: "Método no permitido." });
+    res.status(405).json({ error: "Método no permitido." });
+    return;
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return jsonResponse(500, { error: "Servidor sin API key configurada (ANTHROPIC_API_KEY)." });
+    res.status(500).json({ error: "Servidor sin API key configurada (ANTHROPIC_API_KEY)." });
+    return;
   }
 
-  let body: AnalyzeFilmRequestBody;
-  try {
-    body = (await req.json()) as AnalyzeFilmRequestBody;
-  } catch {
-    return jsonResponse(400, { error: "Cuerpo de la petición no es JSON válido." });
-  }
-
+  // Vercel ya parsea el body como JSON cuando content-type es application/json.
+  const body: AnalyzeFilmRequestBody = isRecord(req.body) ? req.body : {};
   const { imageBase64, mediaType, suggestedLabel } = body;
 
   if (typeof mediaType !== "string" || !ALLOWED_MEDIA_TYPES.has(mediaType)) {
-    return jsonResponse(400, { error: "Tipo de imagen no soportado (usa JPEG, PNG o WebP)." });
+    res.status(400).json({ error: "Tipo de imagen no soportado (usa JPEG, PNG o WebP)." });
+    return;
   }
   if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
-    return jsonResponse(400, { error: "Falta la imagen." });
+    res.status(400).json({ error: "Falta la imagen." });
+    return;
   }
   // Tamaño decodificado aproximado (base64 ocupa ~4/3 del tamaño real).
   if ((imageBase64.length * 3) / 4 > MAX_IMAGE_BYTES) {
-    return jsonResponse(400, { error: "La imagen es demasiado grande." });
+    res.status(400).json({ error: "La imagen es demasiado grande." });
+    return;
   }
 
   const label = typeof suggestedLabel === "string" ? suggestedLabel.slice(0, 60) : "";
@@ -197,28 +192,33 @@ export default async function handler(req: Request): Promise<Response> {
     });
   } catch (err) {
     console.error("analyze-film: fallo de red llamando a Anthropic", err);
-    return jsonResponse(502, { error: "No se pudo contactar con la IA." });
+    res.status(502).json({ error: "No se pudo contactar con la IA." });
+    return;
   }
 
   if (!anthropicResponse.ok) {
     const detail = await anthropicResponse.text().catch(() => "");
     console.error("analyze-film: Anthropic devolvió error", anthropicResponse.status, detail);
-    return jsonResponse(502, { error: "La IA no pudo procesar la foto." });
+    res.status(502).json({ error: "La IA no pudo procesar la foto." });
+    return;
   }
 
   let data: unknown;
   try {
     data = await anthropicResponse.json();
   } catch {
-    return jsonResponse(502, { error: "Respuesta de IA inválida." });
+    res.status(502).json({ error: "Respuesta de IA inválida." });
+    return;
   }
 
   if (!isRecord(data)) {
-    return jsonResponse(502, { error: "Respuesta de IA inesperada." });
+    res.status(502).json({ error: "Respuesta de IA inesperada." });
+    return;
   }
 
   if (data.stop_reason === "refusal") {
-    return jsonResponse(502, { error: "La IA rechazó analizar esta imagen." });
+    res.status(502).json({ error: "La IA rechazó analizar esta imagen." });
+    return;
   }
 
   const content = Array.isArray(data.content) ? data.content : [];
@@ -229,10 +229,11 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (!toolUseBlock || !isRecord(toolUseBlock.input)) {
     console.error("analyze-film: sin bloque tool_use en la respuesta", JSON.stringify(data).slice(0, 500));
-    return jsonResponse(502, { error: "Respuesta de IA inesperada (sin propuesta de película)." });
+    res.status(502).json({ error: "Respuesta de IA inesperada (sin propuesta de película)." });
+    return;
   }
 
-  return jsonResponse(200, { ...toolUseBlock.input, modelId: MODEL_ID });
+  res.status(200).json({ ...toolUseBlock.input, modelId: MODEL_ID });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

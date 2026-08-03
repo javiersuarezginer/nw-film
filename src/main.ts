@@ -701,18 +701,15 @@ function updateBlurParams(state: AppState, width: number, height: number): void 
 }
 
 function updateGrainSize(state: AppState, width: number, sizeMultiplier: number): void {
-  const size = computeGrainSizePx(width, sizeMultiplier);
+  const size = computeGrainSizePx(width, sizeMultiplier * state.currentFilm.grainCharacter.sizeMultiplier);
   // offset 24 bytes = índice 6 (sizeR) en GrainParams; sigue sizeG, sizeB.
   state.device.queue.writeBuffer(state.grainUniformBuffer, 6 * 4, new Float32Array([size.r, size.g, size.b]));
 }
 
 function updateGrainIntensity(state: AppState, multiplier: number): void {
   // offset 36 bytes = índice 9 (intensity); índice 10 (seed) justo después.
-  state.device.queue.writeBuffer(
-    state.grainUniformBuffer,
-    9 * 4,
-    new Float32Array([GRAIN_BASE_INTENSITY * multiplier, GRAIN_SEED])
-  );
+  const effective = GRAIN_BASE_INTENSITY * multiplier * state.currentFilm.grainCharacter.intensityMultiplier;
+  state.device.queue.writeBuffer(state.grainUniformBuffer, 9 * 4, new Float32Array([effective, GRAIN_SEED]));
 }
 
 function updateAcutanceBlurParams(state: AppState, width: number, height: number): void {
@@ -782,11 +779,8 @@ function updateSaturationVibrance(state: AppState): void {
 }
 
 function updateHalationIntensity(state: AppState, multiplier: number): void {
-  state.device.queue.writeBuffer(
-    state.halationParamsBuffer,
-    0,
-    new Float32Array([HALATION_BASE_INTENSITY * multiplier])
-  );
+  const effective = HALATION_BASE_INTENSITY * multiplier * state.currentFilm.halationMultiplier;
+  state.device.queue.writeBuffer(state.halationParamsBuffer, 0, new Float32Array([effective]));
 }
 
 /** Offsets de calibración del papel (neutro en gris) + ajuste manual del usuario (temperatura del papel). */
@@ -855,6 +849,17 @@ function loadFilmIntoState(state: AppState, film: FilmProfile): void {
   // usuario, que se deja intacto.
   updateSceneGrade(state);
   updateSaturationVibrance(state);
+
+  // Grano y halation propios de la película nueva (ver FilmGrainCharacter/
+  // halationMultiplier en registry.ts) — se multiplican por el ajuste
+  // manual del usuario, que se deja intacto. Solo si ya hay una imagen
+  // cargada (imageWidth a 0 antes de la primera carga, igual que el resto
+  // de sitios que dependen del tamaño de imagen).
+  if (state.imageWidth) {
+    updateGrainSize(state, state.imageWidth, parseFloat(grainSizeSlider.value));
+    updateGrainIntensity(state, parseFloat(grainSlider.value));
+    updateHalationIntensity(state, parseFloat(halationSlider.value));
+  }
 }
 
 function renderCurrent(): void {

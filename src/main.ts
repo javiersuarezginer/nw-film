@@ -18,6 +18,15 @@ import scannerPaperShader from "./shaders/scannerPaper.wgsl?raw";
 import lookIntensityShader from "./shaders/lookIntensity.wgsl?raw";
 import type { CurveLUT } from "./color-science/curveModel";
 import { FILMS, DEFAULT_FILM_ID, getFilm, type FilmProfile } from "./color-science/films/registry";
+import {
+  addCustomFilm,
+  getAnyFilm,
+  getCustomFilmRecords,
+  initCustomFilmStore,
+  removeCustomFilm,
+  renderFilmSelectOptions,
+} from "./color-science/films/customFilmStore";
+import { validateAndClampFilmRecord, type FilmRecordContext } from "./color-science/films/customFilm";
 import { buildPaperLUT, PAPER_DENSITY_MIN, PAPER_DENSITY_MAX } from "./color-science/portraEndura/paperCurve";
 
 const MIDDLE_GRAY = 0.18;
@@ -204,16 +213,30 @@ const presetImportButton = document.querySelector<HTMLButtonElement>("#preset-im
 const presetExportButton = document.querySelector<HTMLButtonElement>("#preset-export-button")!;
 const presetFileInput = document.querySelector<HTMLInputElement>("#preset-file-input")!;
 const filmSelect = document.querySelector<HTMLSelectElement>("#film-select")!;
+const filmAnalysisNote = document.querySelector<HTMLParagraphElement>("#film-analysis-note")!;
 const lookIntensitySlider = document.querySelector<HTMLInputElement>("#look-intensity-slider")!;
 const lookIntensityValueLabel = document.querySelector<HTMLSpanElement>("#look-intensity-value")!;
 
-for (const film of FILMS) {
-  const option = document.createElement("option");
-  option.value = film.id;
-  option.textContent = film.label;
-  if (film.id === DEFAULT_FILM_ID) option.selected = true;
-  filmSelect.appendChild(option);
-}
+const createFilmButton = document.querySelector<HTMLButtonElement>("#create-film-button")!;
+const deleteFilmButton = document.querySelector<HTMLButtonElement>("#delete-film-button")!;
+const filmImportButton = document.querySelector<HTMLButtonElement>("#film-import-button")!;
+const filmExportButton = document.querySelector<HTMLButtonElement>("#film-export-button")!;
+const filmFileInput = document.querySelector<HTMLInputElement>("#film-file-input")!;
+
+const createFilmOverlay = document.querySelector<HTMLDivElement>("#create-film-overlay")!;
+const createFilmClose = document.querySelector<HTMLButtonElement>("#create-film-close")!;
+const createFilmFileInput = document.querySelector<HTMLInputElement>("#create-film-file-input")!;
+const createFilmChooseButton = document.querySelector<HTMLButtonElement>("#create-film-choose-button")!;
+const createFilmPreview = document.querySelector<HTMLDivElement>("#create-film-preview")!;
+const createFilmLabelInput = document.querySelector<HTMLInputElement>("#create-film-label-input")!;
+const createFilmAnalyzeButton = document.querySelector<HTMLButtonElement>("#create-film-analyze-button")!;
+const createFilmStatus = document.querySelector<HTMLDivElement>("#create-film-status")!;
+
+// Carga las películas creadas por el usuario (IA/importadas) desde
+// localStorage y puebla el desplegable con las 5 reales + las del
+// usuario (agrupadas aparte solo si hay alguna) — ver customFilmStore.ts.
+initCustomFilmStore();
+renderFilmSelectOptions(filmSelect, DEFAULT_FILM_ID);
 
 const abToggleButton = document.querySelector<HTMLButtonElement>("#ab-toggle")!;
 const zoomSlider = document.querySelector<HTMLInputElement>("#zoom-slider")!;
@@ -999,11 +1022,198 @@ async function openFilmGrid(): Promise<void> {
     }
     filmGridStatus.textContent = "";
   } finally {
-    // Vuelve a la película que estaba activa antes de abrir la cuadrícula.
-    loadFilmIntoState(state, getFilm(originalFilmId));
+    // Vuelve a la película que estaba activa antes de abrir la cuadrícula
+    // (puede ser una custom del usuario, no solo una de las 5 reales).
+    loadFilmIntoState(state, getAnyFilm(originalFilmId));
+    updateCustomFilmUi(state);
     renderCurrent();
     filmGridToggleButton.disabled = false;
   }
+}
+
+/** Muestra/oculta lo que solo aplica a películas creadas por el usuario (nota de análisis, botones de eliminar/exportar). */
+function updateCustomFilmUi(state: AppState): void {
+  const film = state.currentFilm;
+  if (film.isCustom) {
+    const record = getCustomFilmRecords().find((r) => r.id === film.id);
+    filmAnalysisNote.textContent = record?.analysisNote ? `IA: ${record.analysisNote}` : "";
+    filmAnalysisNote.hidden = !record?.analysisNote;
+    deleteFilmButton.hidden = false;
+    filmExportButton.hidden = false;
+  } else {
+    filmAnalysisNote.hidden = true;
+    filmAnalysisNote.textContent = "";
+    deleteFilmButton.hidden = true;
+    filmExportButton.hidden = true;
+  }
+}
+
+let pendingFilmImageFile: File | null = null;
+let pendingFilmPreviewUrl: string | null = null;
+
+function openCreateFilmOverlay(): void {
+  pendingFilmImageFile = null;
+  createFilmFileInput.value = "";
+  createFilmLabelInput.value = "";
+  createFilmPreview.innerHTML = "";
+  createFilmAnalyzeButton.disabled = true;
+  createFilmStatus.textContent = "";
+  if (pendingFilmPreviewUrl) {
+    URL.revokeObjectURL(pendingFilmPreviewUrl);
+    pendingFilmPreviewUrl = null;
+  }
+  createFilmOverlay.hidden = false;
+}
+
+function closeCreateFilmOverlay(): void {
+  createFilmOverlay.hidden = true;
+  if (pendingFilmPreviewUrl) {
+    URL.revokeObjectURL(pendingFilmPreviewUrl);
+    pendingFilmPreviewUrl = null;
+  }
+}
+
+/** Reduce la foto a ≤1024px de lado mayor y la codifica en JPEG — la IA no necesita resolución completa para este análisis, y mantiene la petición pequeña/barata/rápida. */
+const MAX_UPLOAD_DIMENSION = 1024;
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("No se pudo procesar la foto de referencia."));
+      },
+      "image/jpeg",
+      quality
+    );
+  });
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("No se pudo leer la foto de referencia."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function downscaleImageToJpegBase64(file: File): Promise<{ base64: string; mediaType: string }> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, width, height);
+
+  const blob = await canvasToJpegBlob(canvas, 0.85);
+  const base64 = await blobToBase64(blob);
+  return { base64, mediaType: "image/jpeg" };
+}
+
+/** Llama al endpoint de servidor (única pieza no-cliente del proyecto, ver api/analyze-film.ts) — la API key de Anthropic vive solo ahí. */
+async function requestFilmProposal(file: File, suggestedLabel: string): Promise<unknown> {
+  const { base64, mediaType } = await downscaleImageToJpegBase64(file);
+
+  const response = await fetch("/api/analyze-film", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ imageBase64: base64, mediaType, suggestedLabel }),
+  });
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
+        ? (body as { error: string }).error
+        : "Error al analizar la foto.";
+    throw new Error(message);
+  }
+  return body;
+}
+
+async function handleCreateFilmAnalyze(): Promise<void> {
+  if (!pendingFilmImageFile) return;
+
+  createFilmAnalyzeButton.disabled = true;
+  createFilmStatus.textContent = "Analizando foto con IA… puede tardar unos segundos";
+
+  try {
+    const raw = await requestFilmProposal(pendingFilmImageFile, createFilmLabelInput.value);
+    const context: FilmRecordContext = {
+      id: `custom-${crypto.randomUUID()}`,
+      createdAt: new Date().toISOString(),
+      modelId: typeof (raw as Record<string, unknown>).modelId === "string" ? (raw as Record<string, unknown>).modelId as string : "desconocido",
+      sourceImageName: pendingFilmImageFile.name,
+    };
+    const result = validateAndClampFilmRecord(raw, context);
+    if (!result.ok) {
+      createFilmStatus.textContent = `No se pudo crear la película: ${result.reason}`;
+      createFilmAnalyzeButton.disabled = false;
+      return;
+    }
+
+    const persisted = addCustomFilm(result.record);
+    if (!persisted) {
+      setStatus("Película creada, pero no se pudo guardar (almacenamiento lleno) — se perderá al recargar.");
+    }
+    renderFilmSelectOptions(filmSelect, result.record.id);
+    filmSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    closeCreateFilmOverlay();
+  } catch (err) {
+    console.error(err);
+    createFilmStatus.textContent = err instanceof Error ? err.message : "Error inesperado al crear la película.";
+    createFilmAnalyzeButton.disabled = false;
+  }
+}
+
+async function handleFilmExport(): Promise<void> {
+  if (!app || !app.currentFilm.isCustom) return;
+  const record = getCustomFilmRecords().find((r) => r.id === app!.currentFilm.id);
+  if (!record) return;
+  const json = JSON.stringify(record, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  await saveBlob(blob, `${record.label}.nwfilm.json`, "application/json", "Película JSON");
+}
+
+async function importFilmFile(file: File): Promise<void> {
+  try {
+    const text = await file.text();
+    const parsed: unknown = JSON.parse(text);
+    const modelId =
+      isRecordLike(parsed) && typeof parsed.modelId === "string" ? parsed.modelId : "importado";
+    const context: FilmRecordContext = {
+      id: `custom-${crypto.randomUUID()}`, // id nuevo siempre, evita colisión al reimportar el mismo archivo
+      createdAt: new Date().toISOString(),
+      modelId,
+      sourceImageName: file.name,
+    };
+    const result = validateAndClampFilmRecord(parsed, context);
+    if (!result.ok) {
+      setStatus(`Película inválida o corrupta: ${result.reason}`);
+      return;
+    }
+    const persisted = addCustomFilm(result.record);
+    if (!persisted) {
+      setStatus("Película importada, pero no se pudo guardar (almacenamiento lleno) — se perderá al recargar.");
+    }
+    renderFilmSelectOptions(filmSelect, result.record.id);
+    filmSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  } catch (err) {
+    console.error(err);
+    setStatus(err instanceof Error ? err.message : "No se pudo leer el archivo de película.");
+  }
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function collectCurrentPreset(): PresetValues {
@@ -1225,8 +1435,60 @@ lookIntensitySlider.addEventListener("input", () => {
 
 filmSelect.addEventListener("change", () => {
   if (!app) return;
-  loadFilmIntoState(app, getFilm(filmSelect.value));
+  loadFilmIntoState(app, getAnyFilm(filmSelect.value));
+  updateCustomFilmUi(app);
   renderCurrent();
+});
+
+deleteFilmButton.addEventListener("click", () => {
+  if (!app || !app.currentFilm.isCustom) return;
+  if (!confirm(`¿Eliminar "${app.currentFilm.label}"? Esta acción no se puede deshacer.`)) return;
+  removeCustomFilm(app.currentFilm.id);
+  renderFilmSelectOptions(filmSelect, DEFAULT_FILM_ID);
+  filmSelect.value = DEFAULT_FILM_ID;
+  filmSelect.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
+filmExportButton.addEventListener("click", () => {
+  handleFilmExport().catch((err) => {
+    console.error(err);
+    setStatus(err instanceof Error ? err.message : "Error al exportar la película.");
+  });
+});
+
+filmImportButton.addEventListener("click", () => filmFileInput.click());
+filmFileInput.addEventListener("change", () => {
+  const file = filmFileInput.files?.[0];
+  if (file) importFilmFile(file).catch((err) => console.error(err));
+  filmFileInput.value = "";
+});
+
+createFilmButton.addEventListener("click", () => openCreateFilmOverlay());
+createFilmClose.addEventListener("click", () => closeCreateFilmOverlay());
+createFilmOverlay.addEventListener("click", (e) => {
+  if (e.target === createFilmOverlay) closeCreateFilmOverlay();
+});
+createFilmChooseButton.addEventListener("click", () => createFilmFileInput.click());
+createFilmFileInput.addEventListener("change", () => {
+  const file = createFilmFileInput.files?.[0];
+  if (!file) return;
+  pendingFilmImageFile = file;
+  if (pendingFilmPreviewUrl) URL.revokeObjectURL(pendingFilmPreviewUrl);
+  pendingFilmPreviewUrl = URL.createObjectURL(file);
+  createFilmPreview.innerHTML = "";
+  const img = document.createElement("img");
+  img.src = pendingFilmPreviewUrl;
+  img.alt = "Foto de referencia";
+  createFilmPreview.appendChild(img);
+  createFilmAnalyzeButton.disabled = false;
+  createFilmStatus.textContent = "";
+});
+createFilmAnalyzeButton.addEventListener("click", () => {
+  handleCreateFilmAnalyze().catch((err) => {
+    console.error(err);
+    createFilmStatus.textContent = err instanceof Error ? err.message : "Error inesperado al crear la película.";
+    createFilmAnalyzeButton.disabled = false;
+  });
 });
 
 // El arrastre funciona sobre todo el visor, tanto sin imagen cargada como
@@ -1368,6 +1630,7 @@ filmGridOverlay.addEventListener("click", (e) => {
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !filmGridOverlay.hidden) closeFilmGrid();
+  if (e.key === "Escape" && !createFilmOverlay.hidden) closeCreateFilmOverlay();
 });
 
 // Pinch en trackpad: los navegadores lo entregan como evento "wheel" con

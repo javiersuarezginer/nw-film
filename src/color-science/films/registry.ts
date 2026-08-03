@@ -117,6 +117,14 @@ export interface FilmProfile {
   grainCharacter: FilmGrainCharacter;
   /** Intensidad de halation relativa a Portra 400 (1.0 = igual). */
   halationMultiplier: number;
+  /**
+   * true si esta película fue creada por el usuario (IA a partir de una
+   * foto de referencia, o importada), en vez de ser una de las 5 digitalizadas
+   * de datasheets reales. Ausente/false en las 5 de abajo. La UI debe
+   * etiquetar claramente estas películas como emulación, nunca como
+   * equivalentes a una digitalización real (ver customFilm.ts).
+   */
+  isCustom?: boolean;
 }
 
 export const FILMS: FilmProfile[] = [

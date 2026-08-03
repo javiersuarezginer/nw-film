@@ -312,7 +312,8 @@ body {
   color: #888;
 }
 
-#film-grid-overlay {
+#film-grid-overlay,
+#create-film-overlay {
   position: absolute;
   inset: 0;
   z-index: 10;
@@ -322,11 +323,13 @@ body {
   padding: 1.5rem;
 }
 
-#film-grid-overlay[hidden] {
+#film-grid-overlay[hidden],
+#create-film-overlay[hidden] {
   display: none;
 }
 
-#film-grid-header {
+#film-grid-header,
+#create-film-header {
   flex: none;
   display: flex;
   align-items: center;
@@ -336,7 +339,8 @@ body {
   color: #eee;
 }
 
-#film-grid-close {
+#film-grid-close,
+#create-film-close {
   background: #2a2a2a;
   color: #eee;
   border: 1px solid #444;
@@ -348,16 +352,66 @@ body {
   font-size: 0.9rem;
 }
 
-#film-grid-close:hover {
+#film-grid-close:hover,
+#create-film-close:hover {
   border-color: #4ea1ff;
 }
 
-#film-grid-status {
+#film-grid-status,
+#create-film-status {
   flex: none;
   font-size: 0.8rem;
   color: #aaa;
   margin-bottom: 0.5rem;
   min-height: 1em;
+}
+
+#create-film-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 420px;
+}
+
+#create-film-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+#create-film-preview img {
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: 4px;
+  display: block;
+}
+
+#create-film-label-input {
+  background: #1a1a1a;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+
+#film-buttons,
+#film-io-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 0.6rem;
+}
+
+#film-analysis-note {
+  font-size: 0.75rem;
+  color: #999;
+  font-style: italic;
+  margin: 0.4rem 0 0;
+}
+
+#film-analysis-note[hidden] {
+  display: none;
 }
 
 #film-grid {

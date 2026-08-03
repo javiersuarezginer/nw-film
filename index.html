@@ -58,6 +58,22 @@
               <div id="film-grid-status"></div>
               <div id="film-grid"></div>
             </div>
+
+            <div id="create-film-overlay" hidden>
+              <div id="create-film-header">
+                <span>Crear película desde foto</span>
+                <button id="create-film-close" type="button" title="Cerrar">✕</button>
+              </div>
+              <div id="create-film-body">
+                <input id="create-film-file-input" type="file" accept="image/*" hidden />
+                <button id="create-film-choose-button" type="button" class="panel-btn">Elegir foto de referencia…</button>
+                <div id="create-film-preview"></div>
+                <label for="create-film-label-input">Nombre (opcional, la IA sugiere uno)</label>
+                <input id="create-film-label-input" type="text" placeholder="Nombre de la película" />
+                <button id="create-film-analyze-button" type="button" class="panel-btn" disabled>Analizar con IA</button>
+                <div id="create-film-status"></div>
+              </div>
+            </div>
           </div>
 
           <aside id="sidebar">
@@ -65,6 +81,7 @@
               <h3>Película</h3>
               <label for="film-select">Emulsión</label>
               <select id="film-select"></select>
+              <p id="film-analysis-note" hidden></p>
 
               <div class="slider-header">
                 <label for="look-intensity-slider">
@@ -72,6 +89,16 @@
                 </label>
               </div>
               <input id="look-intensity-slider" type="range" min="0" max="100" step="1" value="100" />
+
+              <div id="film-buttons">
+                <button id="create-film-button" type="button" class="panel-btn">Crear película desde foto…</button>
+                <button id="delete-film-button" type="button" class="panel-btn" hidden>Eliminar película</button>
+              </div>
+              <div id="film-io-buttons">
+                <button id="film-import-button" type="button" class="panel-btn">Importar película</button>
+                <button id="film-export-button" type="button" class="panel-btn" hidden>Exportar película</button>
+              </div>
+              <input id="film-file-input" type="file" accept="application/json,.json" hidden />
             </section>
 
             <section class="control-section">

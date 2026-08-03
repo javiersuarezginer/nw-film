@@ -25,14 +25,15 @@ const MIDDLE_GRAY = 0.18;
 // (ya "reveladas" para verse bien en pantalla, no una captura lineal de
 // escena real), así que su gris medio aparente cae por encima de 0.18
 // lineal — alimentar la curva característica sin corregir empuja el
-// trabajo hacia la zona de luces y se ve sobreexpuesto. -0.7 pasos es una
-// corrección de partida basada en el uso del usuario con fotos reales
-// (reportó necesitar entre -0.5 y -1 con normalidad), no un dato de
-// datasheet. El slider de exposición sigue disponible para ajustar por
-// imagen. Ver decisions.md y CLAUDE.md (Capa de IA) — la solución
-// definitiva a este problema es la reconstrucción de altas luces de la
-// Fase 7, que reemplazará esta corrección de partida.
-const DEFAULT_EXPOSURE_STOPS = -0.7;
+// trabajo hacia la zona de luces y se ve sobreexpuesto. -1.0 pasos es una
+// corrección de partida basada en el uso repetido del usuario con fotos
+// reales (subida desde -0.7 tras confirmar que seguía teniendo que bajar
+// la exposición en casi todas las fotos), no un dato de datasheet. El
+// slider de exposición sigue disponible para ajustar por imagen. Ver
+// decisions.md y CLAUDE.md (Capa de IA) — la solución definitiva a este
+// problema es la reconstrucción de altas luces de la Fase 7, que
+// reemplazará esta corrección de partida.
+const DEFAULT_EXPOSURE_STOPS = -1.0;
 const CURVE_PARAMS_FLOATS = 12; // debe coincidir con el struct CurveParams del shader
 const BLUR_PARAMS_FLOATS = 8; // debe coincidir con el struct BlurParams del shader
 const GRAIN_PARAMS_FLOATS = 12; // debe coincidir con el struct GrainParams del shader
@@ -51,7 +52,12 @@ const ZOOM_MAX_PERCENT = 500;
 const HALATION_RADIUS_FRACTION = 0.035;
 const HALATION_RADIUS_MIN_PX = 6;
 const HALATION_RADIUS_MAX_PX = 200;
-const HALATION_BASE_INTENSITY = 0.65; // a intensidad ×1 — misma aproximación artística de antes, ahora ajustable
+// a intensidad ×1. Recalibrado de 0.65 a 0.26 (×0.40) tras confirmar con
+// uso repetido en fotos reales que el halation por defecto quedaba
+// siempre exagerado, obligando a bajar el slider a ~0.40× cada vez — así
+// que ese punto pasa a ser el nuevo ×1 (el slider sigue permitiendo
+// subirlo si una foto concreta lo pide).
+const HALATION_BASE_INTENSITY = 0.26;
 
 // Tamaño de grano por canal, como fracción del ancho de imagen —
 // aproximación razonable, no dato de datasheet (ver grain.wgsl). Escalado
@@ -59,9 +65,17 @@ const HALATION_BASE_INTENSITY = 0.65; // a intensidad ×1 — misma aproximació
 // Portra 400 que mandó el usuario (docs/reference/portra400-grain-reference.jpg,
 // ~5-6px de grano en una imagen de 690px de ancho ≈ fracción 0.007-0.009
 // del ancho) — el tamaño anterior era notablemente más fino que eso.
-const GRAIN_SIZE_FRACTION = { r: 0.0066, g: 0.0054, b: 0.0084 };
+// Recalibrado de nuevo (×0.20) tras confirmar con uso repetido que ese
+// tamaño seguía quedando gigante en fotos reales de resolución normal, y
+// el usuario bajaba el slider a ~0.20× cada vez — ese punto pasa a ser el
+// nuevo ×1.
+const GRAIN_SIZE_FRACTION = { r: 0.00132, g: 0.00108, b: 0.00168 };
 const GRAIN_SIZE_MIN_PX = 1.2;
-const GRAIN_BASE_INTENSITY = 0.045; // amplitud en unidades de densidad, a intensidad ×1
+// amplitud en unidades de densidad, a intensidad ×1. Recalibrado de 0.045
+// a 0.065 (×1.45) tras confirmar con uso repetido que el grano por
+// defecto quedaba sutil de más, obligando a subir el slider a ~1.45× cada
+// vez — ese punto pasa a ser el nuevo ×1.
+const GRAIN_BASE_INTENSITY = 0.065;
 const GRAIN_SEED = 17.0; // fijo: mismo grano siempre para la misma imagen (determinismo)
 
 // Radio de difusión inter-capa, mucho más pequeño que el del halation —
@@ -79,7 +93,10 @@ const ACUTANCE_BASE_AMOUNT = 0.5; // a intensidad ×1
 const SOFTENING_RADIUS_FRACTION = 0.004;
 const SOFTENING_RADIUS_MIN_PX = 1.5;
 const SOFTENING_RADIUS_MAX_PX = 10;
-const SOFTENING_BASE_AMOUNT = 0.35; // mezcla máxima con la versión difuminada, a intensidad ×1
+// mezcla máxima con la versión difuminada, a intensidad ×1. Recalibrado
+// de 0.35 a 0.525 (×1.50) tras confirmar con uso repetido que el usuario
+// siempre añadía más suavizado — ese punto pasa a ser el nuevo ×1.
+const SOFTENING_BASE_AMOUNT = 0.525;
 
 // Fuerza del slider "Temperatura del papel" en unidades de densidad —
 // aproximación de herramienta de edición (como una filtración manual de

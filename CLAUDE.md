@@ -46,11 +46,13 @@ Usos permitidos:
 1. **Inverse tone mapping / reconstrucción de altas luces:** las imágenes de IA llegan display-referred con altas luces clipeadas; el hombro de la curva H&D necesita información por encima del blanco para comprimir. La salida del modelo generativo se usa solo como guía de baja frecuencia en zonas quemadas, mezclada con la imagen original a resolución completa — nunca se acepta la imagen regenerada entera.
 2. **De-texturizado del look plástico de IA** (normalizar micro-textura sintética antes de que el pipeline añada grano y acutancia propios).
 3. **Inpainting de artefactos** (retoque opcional dirigido por el usuario).
+4. **Autoría de un perfil de película nuevo a partir de una foto de referencia** (ver `src/color-science/films/customFilm.ts` y `api/analyze-film.ts`, añadido 2026-08-03). El usuario sube una foto; Claude (vision) propone, en una sola llamada, un perfil completo (curva característica + carácter de color/grano/halation) en el mismo formato que las 5 películas digitalizadas de `registry.ts`. Esto NO es "el look usando IA" en el sentido prohibido por el principio 1 — el pipeline de render sigue siendo 100% físico y determinista sobre el perfil resultante, exactamente igual que con Portra 400; la IA solo hace, una vez, el trabajo de calibración que un humano hizo a mano para las 4 películas no-Portra 400 (ver `docs/decisions.md`, sesión de carácter de color/grano). Diferencia importante con los usos 1-3: esos preprocesan la IMAGEN de entrada; este autoría un PERFIL DE PELÍCULA, y su curva NO es una digitalización de datasheet real (una sola foto no tiene datos de sensitómetro detrás) — se marca siempre `isCustom: true` y se etiqueta en la UI como emulación, nunca como equivalente a las 5 reales.
 
 Reglas de implementación:
-- Paso **opcional**, ejecutado **una sola vez por imagen**, con resultado **cacheado como asset intermedio del proyecto**. Reexportar o reajustar el revelado NUNCA vuelve a llamar a la API ni cambia la imagen base.
-- API candidata: Nano Banana (Google). Verificar estado actual de resolución, precios y capacidades de edición con máscara antes de integrar; evaluar alternativas (Flux + inpainting, modelos dedicados de HDR reconstruction open source auto-hospedados) según coste/calidad en el momento de implementar. La integración debe estar encapsulada tras una interfaz propia para poder cambiar de proveedor.
-- La integración de IA es la ÚLTIMA fase del proyecto. No bloquea nada anterior.
+- Paso **opcional**, ejecutado **una sola vez por imagen** (o por foto de referencia, en el caso del uso 4), con resultado **cacheado** — como asset intermedio del proyecto (usos 1-3) o como registro persistido en `localStorage` (uso 4). Reexportar o reajustar el revelado NUNCA vuelve a llamar a la API ni cambia la imagen/perfil base.
+- API candidata para los usos 1-3: Nano Banana (Google). Verificar estado actual de resolución, precios y capacidades de edición con máscara antes de integrar; evaluar alternativas (Flux + inpainting, modelos dedicados de HDR reconstruction open source auto-hospedados) según coste/calidad en el momento de implementar. La integración debe estar encapsulada tras una interfaz propia para poder cambiar de proveedor.
+- El uso 4 (ya implementado) usa la API de Claude (`claude-sonnet-5`, tool-use forzado) vía `api/analyze-film.ts` — la API key vive solo en el servidor (variable de entorno `ANTHROPIC_API_KEY` en Vercel), nunca en el cliente.
+- La integración de IA para los usos 1-3 sigue siendo la ÚLTIMA fase del proyecto y no bloquea nada anterior. El uso 4 se adelantó fuera de ese orden porque el usuario lo pidió explícitamente como función independiente, no como parte de la Fase 7.
 
 ## Stack técnico
 
@@ -58,6 +60,7 @@ Reglas de implementación:
 - **WebGPU** como target principal de render. (Fallback WebGL2: decisión pendiente, no implementar de entrada.)
 - Shaders en WGSL, organizados como passes componibles.
 - Sin frameworks pesados de estado por ahora; mantener el core de render desacoplado de la UI.
+- **Cliente 100% estático salvo UNA excepción:** `api/analyze-film.ts` (Vercel Function, `req`/`res` clásico de Node — no la firma Web `Request`/`Response`) es el único código de servidor de todo el proyecto, y existe solo para que la API key de Anthropic no llegue nunca al navegador (ver "Capa de IA", uso 4). No añadir más backend salvo que haga falta guardar un secreto igual que este.
 
 ## Fases de desarrollo (orden estricto — validar lo difícil primero)
 
